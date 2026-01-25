@@ -2,7 +2,7 @@
 
 **ChaqGPT** is a powerful, free-to-use AI chat interface that provides access to state-of-the-art open-source models including DeepSeek R1, Llama 3.3, Qwen, and more. It features a modern, responsive UI with advanced capabilities like reasoning visualization, code syntax highlighting, and persistent chat history.
 
-![ChaqGPT Screenshot](assets/screenshot.png) *(Note: Add a screenshot here)*
+![ChaqGPT Screenshot](assets/screenshot.png) 
 
 ## 🚀 Features
 
@@ -53,13 +53,6 @@
     ```
     Or simply open `index.html` in a browser (some API features may require a backend proxy if configured).
 
-## 📦 Deployment
-
-This project is ready to deploy on Vercel.
-
-1.  Push to GitHub.
-2.  Import project in Vercel.
-3.  Deploy!
 
 ## 🤖 Default Model
 
