@@ -1,19 +1,4 @@
-// File: /api/chat.js
-
-// This is a modern way to handle streaming data from one source to another.
-async function pipeStream(readable, writable) {
-  const reader = readable.getReader();
-  const writer = writable; // The server's response object is a writable stream.
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      writer.end(); // Signal that we're finished writing.
-      break;
-    }
-    writer.write(value); // Write the data chunk to the response.
-  }
-}
+const { pipeline } = require('node:stream/promises');
 
 module.exports = async function handler(request, response) {
   if (request.method !== 'POST') {
@@ -61,7 +46,7 @@ module.exports = async function handler(request, response) {
     });
     
     // ✅ Pipe the stream from OpenRouter's API directly to the client's browser
-    await pipeStream(openrouterResponse.body, response);
+    await pipeline(openrouterResponse.body, response);
 
   } catch (error) {
     console.error('An error occurred:', error);
