@@ -344,16 +344,15 @@ async function addAssistantMessage(content, showTyping = true) {
     const textDiv = messageGroup.querySelector('.assistant-message-text');
 
     if (showTyping) {
-        const chunkSize = 5;
+        const chunkSize = 20;
         let displayedText = '';
         for (let i = 0; i < finalContent.length; i += chunkSize) {
             if (shouldStopTyping) break;
             const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
             displayedText += finalContent.substring(i, i + chunkSize);
             textDiv.innerHTML = formatContent(displayedText);
-            try { renderMathInElement(textDiv, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }], throwOnError: false }); } catch (e) { }
             if (isScrolledToBottom) chatArea.scrollTop = chatArea.scrollHeight;
-            await new Promise(resolve => setTimeout(resolve, 8));
+            await new Promise(resolve => setTimeout(resolve, 32));
         }
         if (!shouldStopTyping) textDiv.innerHTML = formatContent(finalContent);
     } else {
