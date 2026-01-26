@@ -166,11 +166,23 @@ function initializeModels() {
 
     if (dropdown) {
         dropdown.innerHTML = html;
-        dropdown.querySelectorAll('.model-item').forEach(item => item.addEventListener('click', (e) => { e.stopPropagation(); selectModel(item); }));
+        dropdown.addEventListener('click', (e) => {
+            const item = e.target.closest('.model-item');
+            if (item) {
+                e.stopPropagation();
+                selectModel(item);
+            }
+        });
     }
     if (headerDropdown) {
         headerDropdown.innerHTML = html;
-        headerDropdown.querySelectorAll('.model-item').forEach(item => item.addEventListener('click', (e) => { e.stopPropagation(); selectModel(item); }));
+        headerDropdown.addEventListener('click', (e) => {
+            const item = e.target.closest('.model-item');
+            if (item) {
+                e.stopPropagation();
+                selectModel(item);
+            }
+        });
     }
 
     const savedModelData = models.find(m => m.id === currentModel);
