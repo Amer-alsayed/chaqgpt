@@ -460,6 +460,8 @@ window.sendMessage = async function () {
 
     // Reset accumulated content for new turn
     accumulatedContent = '';
+    committedContentHTML = '';
+    committedRawLength = 0;
     accumulatedReasoning = '';
     renderQueue = [];
     isRendering = false;
@@ -635,6 +637,8 @@ window.sendMessage = async function () {
 
 // Adaptive Render Engine
 let accumulatedContent = '';
+let committedContentHTML = '';
+let committedRawLength = 0;
 let accumulatedReasoning = '';
 
 async function processRenderQueue(contentContainer, thinkingContainer) {
@@ -678,7 +682,17 @@ async function processRenderQueue(contentContainer, thinkingContainer) {
         }
 
         if (hasContentUpdate) {
-            contentContainer.innerHTML = formatContent(accumulatedContent + '▋');
+            const uncommitted = accumulatedContent.substring(committedRawLength);
+            const relativeSplitIndex = findSplitIndex(uncommitted);
+
+            if (relativeSplitIndex > 0) {
+                 const newChunk = uncommitted.substring(0, relativeSplitIndex);
+                 committedContentHTML += formatContent(newChunk);
+                 committedRawLength += relativeSplitIndex;
+            }
+
+            const remaining = accumulatedContent.substring(committedRawLength);
+            contentContainer.innerHTML = committedContentHTML + formatContent(remaining + '▋');
             // Only run heavy MathJax/HighlightJS occasionally or at end, but for live stream basic formatting is enough
             // We can skip heavy formatting during fast stream for performance
         }
@@ -811,6 +825,77 @@ function loadChat(chatId, itemEl) {
     if (itemEl) itemEl.classList.add('active');
     window.scrollToBottom(false);
     if (window.innerWidth <= 768) window.closeSidebar();
+}
+
+function findSplitIndex(text) {
+    // 1. Identify unsafe ranges (Code Blocks)
+    const unsafeRanges = [];
+    const codeBlockRegex = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
+    let match;
+    let lastCodeBlockEnd = 0;
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+        unsafeRanges.push({ start: match.index, end: match.index + match[0].length });
+        lastCodeBlockEnd = match.index + match[0].length;
+    }
+
+    // Check for open code block at the end
+    const openBlockStart = text.indexOf('```', lastCodeBlockEnd);
+    if (openBlockStart !== -1) {
+        unsafeRanges.push({ start: openBlockStart, end: text.length });
+    }
+
+    // 2. Identify unsafe ranges (Inline Code) in the gaps
+    const combinedRanges = [...unsafeRanges]; // Copy
+    unsafeRanges.sort((a, b) => a.start - b.start);
+
+    const checkGap = (start, end) => {
+        if (start >= end) return;
+        const substring = text.substring(start, end);
+        const inlineRegex = /`([^`]+)`/g;
+        let m;
+        let lastInlineEnd = 0;
+        while ((m = inlineRegex.exec(substring)) !== null) {
+            combinedRanges.push({ start: start + m.index, end: start + m.index + m[0].length });
+            lastInlineEnd = m.index + m[0].length;
+        }
+
+        const remaining = substring.substring(lastInlineEnd);
+        const firstBacktick = remaining.indexOf('`');
+        if (firstBacktick !== -1) {
+             combinedRanges.push({ start: start + lastInlineEnd + firstBacktick, end: end });
+        }
+    };
+
+    if (unsafeRanges.length === 0) {
+        checkGap(0, text.length);
+    } else {
+        checkGap(0, unsafeRanges[0].start);
+        for (let i = 0; i < unsafeRanges.length - 1; i++) {
+            checkGap(unsafeRanges[i].end, unsafeRanges[i + 1].start);
+        }
+        checkGap(unsafeRanges[unsafeRanges.length - 1].end, text.length);
+    }
+
+    // 3. Find last \n\n
+    const doubleNewline = '\n\n';
+    let searchPos = text.lastIndexOf(doubleNewline);
+
+    while (searchPos !== -1) {
+        const splitPoint = searchPos + 2;
+        const isUnsafe = combinedRanges.some(r => {
+            return (searchPos >= r.start && searchPos < r.end) ||
+                   (searchPos + 1 >= r.start && searchPos + 1 < r.end);
+        });
+
+        if (!isUnsafe) {
+            return splitPoint;
+        }
+
+        searchPos = text.lastIndexOf(doubleNewline, searchPos - 1);
+    }
+
+    return 0;
 }
 
 // Event Listeners for miscellaneous things
