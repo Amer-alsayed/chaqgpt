@@ -2314,6 +2314,8 @@ body {
         width: 36px !important;
         height: 36px !important;
         min-width: 36px !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     /* Model selector: takes remaining space, truncates */
@@ -2330,6 +2332,7 @@ body {
         max-width: 100% !important;
         min-width: 0 !important;
         overflow: hidden !important;
+        padding: 4px 8px !important;
     }
 
     .chat-header .header-model-name {
@@ -2353,6 +2356,8 @@ body {
         width: 36px !important;
         height: 36px !important;
         min-width: 36px !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     /* Temp chat: fixed size */
@@ -2362,6 +2367,8 @@ body {
         width: 36px !important;
         height: 36px !important;
         min-width: 36px !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     .welcome-heading {
