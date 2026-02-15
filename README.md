@@ -1,70 +1,127 @@
-# ChaqGPT
+<div align="center">
 
-**ChaqGPT** is a powerful, free-to-use AI chat interface that provides access to state-of-the-art open-source models including DeepSeek R1, Llama 3.3, Qwen, and more. It features a modern, responsive UI with advanced capabilities like reasoning visualization, code syntax highlighting, and persistent chat history.
+# ✦ ChaqGPT
 
-![ChaqGPT Screenshot](assets/screenshot.png) *(Note: Add a screenshot here)*
+**A sleek, free AI chat interface powered by the world's best open-source models.**
 
-## 🚀 Features
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/import/project?template=https://github.com/Amer-alsayed/chaqgpt)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
--   **Multi-Model Support**: Access to top-tier models via free APIs:
-    -   **Reasoning**: DeepSeek R1T2 Chimera (Default), DeepSeek R1, GPT-OSS 120B.
-    -   **General**: Llama 3.3 70B, Qwen, Mistral, Gemma 3.
-    -   **Coding**: Qwen3 Coder, Mistral Devstral.
--   **Thinking Process Visualization**: Watch the AI "think" in real-time with expandable reasoning sections for models like DeepSeek R1.
--   **Adaptive Rendering**:
-    -   **Sticky Scroll**: Robust "stick-to-bottom" logic that respects user reading.
-    -   **Render Queue**: Smooth 60fps adaptive typing engine that handles fast token streams without lag.
--   **Developer Friendly**:
-    -   Full Markdown & LaTeX (Math) support.
-    -   Syntax highlighting for code blocks with one-click copy.
--   **User Experience**:
-    -   Dark/Light theme toggle.
-    -   Mobile-first responsive design.
-    -   Local storage for chat history and settings.
+[Live Demo](https://chaqgpt.vercel.app) · [Report Bug](https://github.com/Amer-alsayed/chaqgpt/issues) · [Request Feature](https://github.com/Amer-alsayed/chaqgpt/issues)
+
+</div>
+
+---
+
+## ✨ Features
+
+| Category | Details |
+|---|---|
+| **Multi-Model Access** | 30+ free models — Qwen3 VL, DeepSeek R1, Llama 3.3 70B, Gemma 3, Mistral, and more |
+| **Vision Support** | Upload images and get AI analysis with vision-enabled models |
+| **Thinking Visualization** | Watch reasoning models "think" in real-time with expandable thought chains |
+| **Rich Rendering** | Full Markdown, LaTeX math (KaTeX), syntax-highlighted code blocks with copy |
+| **Chat History** | Persistent conversations stored locally — pick up where you left off |
+| **Dark & Light Themes** | Toggle between themes; follows system preference by default |
+| **Temporary Chat** | One-off conversations that aren't saved to history |
+| **Mobile Optimized** | Responsive design with keyboard-aware viewport handling |
+| **Streaming Responses** | Token-by-token streaming with adaptive 60fps render queue |
+| **Zero Framework** | Pure HTML/CSS/JS — fast, lightweight, no build step required |
+
+---
 
 ## 🛠️ Tech Stack
 
--   **Frontend**: Vanilla HTML/CSS/JavaScript (No heavy framework overhead).
--   **Deployment**: Optimized for [Vercel](https://vercel.com).
--   **Styles**: Custom CSS with Apple-like spring animations and glassmorphism.
+- **Frontend** — Vanilla HTML, CSS, JavaScript (no framework overhead)
+- **Backend** — Vercel Serverless Functions (Node.js)
+- **AI Provider** — [OpenRouter](https://openrouter.ai) (free-tier models)
+- **Rendering** — [Marked](https://marked.js.org) + [KaTeX](https://katex.org) + [Highlight.js](https://highlightjs.org)
+- **Design** — Custom CSS with spring animations, glassmorphism, and safe-area support
 
-## 🚀 Getting Started
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
--   Node.js (for local dev/Vercel CLI).
+- [Node.js](https://nodejs.org) 18+
+- An [OpenRouter](https://openrouter.ai) API key (free)
 
 ### Local Development
 
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/chaqgpt.git
-    cd chaqgpt
-    ```
+```bash
+# Clone the repo
+git clone https://github.com/Amer-alsayed/chaqgpt.git
+cd chaqgpt
 
-2.  Install Vercel CLI (optional, for emulation):
-    ```bash
-    npm i -g vercel
-    ```
+# Install Vercel CLI
+npm i -g vercel
 
-3.  Run locally:
-    ```bash
-    vercel dev
-    ```
-    Or simply open `index.html` in a browser (some API features may require a backend proxy if configured).
+# Create .env file with your API key
+echo OPENROUTER_API_KEY=your_key_here > .env
 
-## 📦 Deployment
+# Start the dev server
+vercel dev
+```
 
-This project is ready to deploy on Vercel.
+The app will be available at `http://localhost:3000`.
 
-1.  Push to GitHub.
-2.  Import project in Vercel.
-3.  Deploy!
+---
+
+## 📦 Deploy to Vercel
+
+1. **Push** your code to GitHub
+2. **Import** the repo in [Vercel](https://vercel.com/new)
+3. **Add** the environment variable:
+   | Variable | Value |
+   |---|---|
+   | `OPENROUTER_API_KEY` | Your OpenRouter API key |
+4. **Deploy** — that's it!
+
+> [!TIP]
+> The app automatically fetches all available free models from OpenRouter at runtime. No config changes needed when new models are added.
+
+---
 
 ## 🤖 Default Model
 
-The default model is currently set to **DeepSeek R1T2 Chimera**, a robust reasoning model that balances performance and language stability.
+New users start with **Qwen3 VL 30B A3B Thinking** — a powerful vision + reasoning model. Users can switch models anytime via the header dropdown, and their preference is saved locally.
+
+---
+
+## 📁 Project Structure
+
+```
+chaqgpt/
+├── api/
+│   ├── chat.js          # Chat completion proxy (streaming)
+│   └── models.js        # Fetches & filters free models from OpenRouter
+├── assets/
+│   ├── css/style.css    # Complete design system
+│   └── js/
+│       ├── app.js       # Core application logic
+│       └── config.js    # Welcome messages & suggestion sets
+├── index.html           # Single-page application entry
+├── vercel.json          # Vercel deployment config
+└── .env                 # API key (not committed)
+```
+
+---
+
+## 🔒 Security
+
+- API keys are **never** exposed to the client
+- All API calls route through serverless functions
+- `.env` is gitignored by default
+
+---
 
 ## 📄 License
 
-[MIT](LICENSE)
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+  <sub>Built with ☕ by <a href="https://github.com/Amer-alsayed">Amer Alsayed</a></sub>
+</div>
