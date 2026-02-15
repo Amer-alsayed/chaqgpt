@@ -15,17 +15,17 @@
 
 ## 📸 Screenshots
 
-<div align="center">
+### Welcome Screen
+![Welcome Screen](assets/preview-welcome.png)
 
-| Welcome Screen | Math & LaTeX Rendering |
-|---|---|
-| ![Welcome](assets/preview-welcome.png) | ![Math](assets/preview-math.png) |
+### Math & LaTeX Rendering
+![Math & LaTeX Rendering](assets/preview-math.png)
 
-| Thinking Visualization | Sidebar & Chat Search |
-|---|---|
-| ![Thinking](assets/preview-thinking.png) | ![Sidebar](assets/preview-sidebar.png) |
+### Thinking Visualization
+![Thinking Visualization](assets/preview-thinking.png)
 
-</div>
+### Sidebar & Chat Search
+![Sidebar & Chat Search](assets/preview-sidebar.png)
 
 ---
 
