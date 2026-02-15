@@ -2295,7 +2295,7 @@ body {
     }
 
     .chat-header {
-        padding: 6px 0px 6px 8px !important;
+        padding: 8px !important;
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
@@ -2337,7 +2337,7 @@ body {
         order: 2 !important;
         flex: 1 1 0 !important;
         min-width: 0 !important;
-        max-width: calc(100% - 160px) !important;
+        max-width: calc(100% - 120px) !important;
         overflow: visible !important;
     }
 
