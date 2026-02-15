@@ -13,6 +13,22 @@
 
 ---
 
+## 📸 Screenshots
+
+<div align="center">
+
+| Welcome Screen | Math & LaTeX Rendering |
+|---|---|
+| ![Welcome](assets/preview-welcome.png) | ![Math](assets/preview-math.png) |
+
+| Thinking Visualization | Sidebar & Chat Search |
+|---|---|
+| ![Thinking](assets/preview-thinking.png) | ![Sidebar](assets/preview-sidebar.png) |
+
+</div>
+
+---
+
 ## ✨ Features
 
 | Category | Details |
