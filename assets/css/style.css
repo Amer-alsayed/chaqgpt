@@ -1636,9 +1636,7 @@ body {
     border-radius: 8px;
     overflow: hidden;
     border: 1px solid var(--border-code);
-    display: block;
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
@@ -2240,7 +2238,9 @@ body {
 
     /* Horizontal scroll for tables and code on mobile */
     .assistant-message-content table {
+        display: block;
         max-width: calc(100vw - 40px);
+        -webkit-overflow-scrolling: touch;
     }
 
     .assistant-message-content th,
