@@ -110,21 +110,10 @@ function setupMobileKeyboard() {
 
             // Prevent browser from scrolling the page behind
             window.scrollTo(0, 0);
-
-            // Scroll chat to bottom when keyboard opens
-            setTimeout(() => scrollToBottom(true), 50);
         };
 
         window.visualViewport.addEventListener('resize', handler);
         window.visualViewport.addEventListener('scroll', handler);
-    }
-
-    // Scroll to bottom when input is focused
-    const messageInput = document.getElementById('messageInput');
-    if (messageInput) {
-        messageInput.addEventListener('focus', () => {
-            setTimeout(() => scrollToBottom(true), 300);
-        });
     }
 }
 
