@@ -5,7 +5,7 @@ const API_URL = '/api/chat';
 let conversationHistory = [];
 let isProcessing = false;
 let messagesContainer = null;
-let currentModel = 'tngtech/deepseek-r1t2-chimera:free'; // Default fallback
+let currentModel = 'qwen/qwen3-vl-30b-a3b:free'; // Default: Qwen3 VL 30B A3B Thinking
 let currentChatId = null;
 let chatHistoryData = {};
 let abortController = null;
@@ -35,12 +35,11 @@ async function fetchModels() {
                     currentModel = saved;
                     updateHeaderModelDisplay();
                 } else if (!currentModelExists) {
-                    // If neither saved nor current model found, switch to first available
-                    if (availableModels.length > 0) {
-                        currentModel = availableModels[0].id;
-                        saveSelectedModel();
-                        updateHeaderModelDisplay();
-                    }
+                    // Prefer Qwen3 VL 30B A3B as default for new users
+                    const preferredDefault = availableModels.find(m => m.id.includes('qwen3-vl-30b-a3b'));
+                    currentModel = preferredDefault ? preferredDefault.id : availableModels[0].id;
+                    saveSelectedModel();
+                    updateHeaderModelDisplay();
                 } else {
                     updateHeaderModelDisplay();
                 }
