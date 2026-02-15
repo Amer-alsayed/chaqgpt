@@ -578,12 +578,24 @@ body {
     margin-bottom: 8px;
     box-shadow: 0 8px 24px var(--shadow-color);
     display: none;
-    animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 2001;
 }
 
 .user-menu.show {
     display: block;
+    animation: userMenuSlideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes userMenuSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 @keyframes slideUp {
@@ -2283,7 +2295,7 @@ body {
     }
 
     .chat-header {
-        padding: 6px 8px !important;
+        padding: 6px 4px 6px 8px !important;
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
