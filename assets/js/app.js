@@ -95,21 +95,28 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupMobileKeyboard() {
     if (window.innerWidth > 768) return;
 
-    // Use visualViewport API for smooth keyboard handling
     if (window.visualViewport) {
-        let prevHeight = window.visualViewport.height;
-        window.visualViewport.addEventListener('resize', () => {
-            const currentHeight = window.visualViewport.height;
+        const handler = () => {
+            const vv = window.visualViewport;
             const appContainer = document.querySelector('.app-container');
-            if (appContainer) {
-                appContainer.style.height = currentHeight + 'px';
-            }
-            // Keyboard opened (viewport got smaller) — scroll to bottom
-            if (currentHeight < prevHeight - 50) {
-                setTimeout(() => scrollToBottom(true), 100);
-            }
-            prevHeight = currentHeight;
-        });
+            if (!appContainer) return;
+
+            // Set the app container to match the visual viewport exactly
+            appContainer.style.height = vv.height + 'px';
+            appContainer.style.position = 'fixed';
+            appContainer.style.top = vv.offsetTop + 'px';
+            appContainer.style.left = '0';
+            appContainer.style.right = '0';
+
+            // Prevent browser from scrolling the page behind
+            window.scrollTo(0, 0);
+
+            // Scroll chat to bottom when keyboard opens
+            setTimeout(() => scrollToBottom(true), 50);
+        };
+
+        window.visualViewport.addEventListener('resize', handler);
+        window.visualViewport.addEventListener('scroll', handler);
     }
 
     // Scroll to bottom when input is focused
