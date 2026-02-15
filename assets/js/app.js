@@ -1476,14 +1476,7 @@ window.addEventListener('load', () => {
 document.getElementById('modalOverlay').addEventListener('click', (e) => { if (e.target.id === 'modalOverlay') window.closeUsernameModal(); });
 document.getElementById('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.saveUsername(); });
 window.addEventListener('orientationchange', () => { setTimeout(() => { window.scrollToBottom(false); }, 300); });
-let lastHeight = window.innerHeight;
-window.addEventListener('resize', () => {
-    const currentHeight = window.innerHeight;
-    if (currentHeight < lastHeight) {
-        setTimeout(() => { window.scrollToBottom(true); }, 100);
-    }
-    lastHeight = currentHeight;
-});
+
 
 // Image lightbox
 window.openImageLightbox = function (src) {
