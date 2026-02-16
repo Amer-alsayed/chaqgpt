@@ -17,6 +17,7 @@ app.use(express.static(path.join(__dirname, '.')));
 // Import the API handler
 const chatHandler = require('./api/chat');
 const modelsHandler = require('./api/models');
+const executeHandler = require('./api/execute');
 
 // Mount the API handler
 app.get('/api/models', async (req, res) => {
@@ -35,6 +36,17 @@ app.post('/api/chat', async (req, res) => {
     await chatHandler(req, res);
   } catch (error) {
     console.error('Error in /api/chat handler:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
+
+app.post('/api/execute', async (req, res) => {
+  try {
+    await executeHandler(req, res);
+  } catch (error) {
+    console.error('Error in /api/execute handler:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal Server Error' });
     }

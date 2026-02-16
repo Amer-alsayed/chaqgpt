@@ -4,7 +4,7 @@
 async function pipeStream(readable, writable) {
   const reader = readable.getReader();
   const writer = writable; // The server's response object is a writable stream.
-  
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -40,11 +40,9 @@ module.exports = async function handler(request, response) {
       body: JSON.stringify({
         model,
         messages,
-        temperature: 0.7,
-        max_tokens: 4096,
-        top_p: 1,
+        max_tokens: 16384,
         // ✅ The crucial change: enable streaming
-        stream: true, 
+        stream: true,
       }),
     });
 
@@ -59,7 +57,7 @@ module.exports = async function handler(request, response) {
       'Cache-Control': 'no-cache',         // Prevents caching of the stream
       'Connection': 'keep-alive',          // Keeps the connection open
     });
-    
+
     // ✅ Pipe the stream from OpenRouter's API directly to the client's browser
     await pipeStream(openrouterResponse.body, response);
 
