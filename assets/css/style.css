@@ -1291,6 +1291,7 @@ body {
     position: relative;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: auto;
+    padding-bottom: 128px;
 }
 
 
@@ -2025,14 +2026,20 @@ body {
     padding: 20px;
     display: flex;
     justify-content: center;
-    background: var(--bg-primary);
+    background: transparent;
     padding-bottom: max(20px, env(safe-area-inset-bottom));
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
 }
 
 .input-container {
     width: 100%;
     max-width: 800px;
     position: relative;
+    pointer-events: auto;
 }
 
 .input-wrapper {
@@ -2619,9 +2626,20 @@ body {
         padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
 
+    .chat-area {
+        padding-bottom: 150px;
+    }
+
     .input-wrapper {
+        border: 1px solid var(--border-interactive);
         border-radius: 24px;
         padding: 10px 10px 10px 16px;
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-interactive) 55%, transparent);
+    }
+
+    .input-wrapper:focus-within {
+        border-color: var(--border-interactive);
+        box-shadow: 0 0 0 2px var(--border-interactive);
     }
 
     /* Place canvas toggle above the input bar on mobile (left-aligned) */
@@ -2635,6 +2653,11 @@ body {
         padding: 5px 11px;
         border-radius: 16px;
         z-index: 2;
+        border: 1px solid var(--border-interactive);
+        background: color-mix(in srgb, var(--bg-tertiary) 96%, transparent);
+        color: var(--text-secondary);
+        opacity: 1;
+        backdrop-filter: blur(6px);
     }
 
     .input-container {
