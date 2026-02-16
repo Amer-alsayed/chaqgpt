@@ -202,10 +202,7 @@
                     <div class="suggestion-grid" id="suggestionGrid"></div>
                 </div>
             </div>
-            <div class="bottom-controls"><button class="stop-generating" id="stopGenerating"
-                    onclick="stopGeneration()"><svg viewBox="0 0 24 24" fill="currentColor">
-                        <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg> Stop generating</button><button class="scroll-to-bottom" id="scrollToBottom"
+            <div class="bottom-controls"><button class="scroll-to-bottom" id="scrollToBottom"
                     onclick="scrollToBottom(true)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor">
                         <path d="M19 14l-7 7-7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -237,7 +234,7 @@
                         <div id="imagePreviewContainer" class="image-preview-container"></div>
                         <textarea id="messageInput" class="message-input" placeholder="Ask anything" rows="1"
                             oninput="handleInput()" onkeydown="handleKeyPress(event)"></textarea><button id="sendButton"
-                            class="send-button" onclick="sendMessage()"><svg width="20" height="20" viewBox="0 0 24 24"
+                            class="send-button" onclick="handleSendClick()"><svg width="20" height="20" viewBox="0 0 24 24"
                                 fill="none" stroke="currentColor">
                                 <path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round" />
