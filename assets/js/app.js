@@ -530,6 +530,9 @@ window.handleInput = function () {
 
 window.handleKeyPress = function (event) {
     if (event.key === 'Enter' && !event.shiftKey) {
+        // On mobile, Enter inserts a newline; use the send button to send
+        const isMobile = window.innerWidth <= 768 || ('ontouchstart' in window);
+        if (isMobile) return; // let default newline happen
         event.preventDefault();
         window.sendMessage();
     }

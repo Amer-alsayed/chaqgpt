@@ -2609,6 +2609,23 @@ body {
         padding: 10px 10px 10px 16px;
     }
 
+    /* Move canvas toggle below the input bar on mobile */
+    .canvas-mode-toggle {
+        position: absolute;
+        bottom: -36px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 12px;
+        padding: 4px 10px;
+        border-radius: 14px;
+        z-index: 2;
+    }
+
+    .input-container {
+        position: relative;
+        margin-bottom: 28px;
+    }
+
     .message-input {
         font-size: 16px;
         line-height: 22px;
