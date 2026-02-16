@@ -85,10 +85,14 @@ class CanvasManager {
 
         if (strategy === 'latex') {
             // Browser PDF viewers are often blocked in sandboxed iframes.
-            iframe.removeAttribute('sandbox');
+            iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox');
         } else {
             iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-same-origin');
         }
+    }
+
+    _isMobileViewport() {
+        return window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
     }
 
     getConfig(lang) {
@@ -453,9 +457,76 @@ class CanvasManager {
         this._revokeLatexPreviewUrl();
         this._latexPdfPreviewUrl = objectUrl;
 
-        // Important: srcdoc takes precedence over src when present.
-        iframe.removeAttribute('srcdoc');
-        iframe.src = objectUrl;
+        if (this._isMobileViewport()) {
+            // Mobile Chrome often cannot render blob PDFs inline inside an iframe.
+            iframe.src = 'about:blank';
+            iframe.srcdoc = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 14px;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0f172a;
+            color: #cbd5e1;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .badge {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            background: rgba(148, 163, 184, 0.12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+        .open-btn {
+            border: none;
+            border-radius: 14px;
+            padding: 14px 26px;
+            font-size: 20px;
+            font-weight: 600;
+            background: #7ea9eb;
+            color: #0f172a;
+            width: min(94vw, 520px);
+            cursor: pointer;
+        }
+        .hint {
+            text-align: center;
+            font-size: 14px;
+            color: #94a3b8;
+            max-width: 560px;
+        }
+    </style>
+</head>
+<body>
+    <div class="badge">PDF</div>
+    <button class="open-btn" id="openPdfBtn" type="button">Open</button>
+    <div class="hint">Mobile browsers may not display PDF inline in the preview pane.</div>
+    <script>
+        const pdfUrl = ${JSON.stringify(objectUrl)};
+        const openBtn = document.getElementById('openPdfBtn');
+        openBtn.addEventListener('click', () => {
+            window.open(pdfUrl, '_blank');
+        });
+    </script>
+</body>
+</html>`;
+        } else {
+            // Important: srcdoc takes precedence over src when present.
+            iframe.removeAttribute('srcdoc');
+            iframe.src = objectUrl;
+        }
     }
 
     _showLatexPreviewError(message) {
@@ -502,6 +573,34 @@ class CanvasManager {
         return `${compiler}::${code}`;
     }
 
+    _prepareLatexSourceForCompile(code) {
+        const raw = String(code || '').trim();
+        if (!raw) return raw;
+
+        const hasDocClass = /\\documentclass(\[[^\]]*])?\{[^}]+\}/.test(raw);
+        const hasBeginDoc = /\\begin\{document\}/.test(raw);
+        const hasEndDoc = /\\end\{document\}/.test(raw);
+
+        if (hasDocClass && hasBeginDoc && hasEndDoc) {
+            return raw;
+        }
+
+        if (hasDocClass && !hasBeginDoc && !hasEndDoc) {
+            return `${raw}\n\\begin{document}\n\\end{document}`;
+        }
+
+        if (!hasDocClass && hasBeginDoc && hasEndDoc) {
+            return `\\documentclass{article}\n${raw}`;
+        }
+
+        const body = raw
+            .replace(/\\begin\{document\}/g, '')
+            .replace(/\\end\{document\}/g, '')
+            .trim();
+
+        return `\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}`;
+    }
+
     _parseLatexErrorMessage(text, fallback) {
         if (!text) return fallback;
         if (text.startsWith('%PDF-') || text.includes('\n%PDF-')) {
@@ -518,7 +617,7 @@ class CanvasManager {
 
     async _compileLatex(code, compiler = 'pdflatex', options = {}) {
         const useCache = options.useCache !== false;
-        const latexCode = String(code || '');
+        const latexCode = this._prepareLatexSourceForCompile(code);
         if (!latexCode.trim()) {
             throw new Error('No LaTeX code to compile.');
         }
@@ -1142,10 +1241,12 @@ window.updateCanvasCodeAndPreview = function (code, lang) {
         if (langBadge) langBadge.textContent = config.label;
         if (langIcon) langIcon.textContent = config.icon;
 
-        // Auto-run preview for web languages
+        // Auto-run preview for web and LaTeX languages
         if (config.strategy === 'web') {
             canvasManager.switchTab('preview');
             canvasManager._runWeb(code, effectiveLang);
+        } else if (config.strategy === 'latex') {
+            canvasManager._runLatex(code);
         }
     }
 };
