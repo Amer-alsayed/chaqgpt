@@ -1288,7 +1288,7 @@ window.closeChatMenu = function () {
 window.renameChat = function (chatId, event) {
     if (event) event.stopPropagation();
     window.closeChatMenu();
-    const navItem = document.querySelector(`.nav - item[data - chat - id="${chatId}"]`);
+    const navItem = document.querySelector(`.nav-item[data-chat-id="${chatId}"]`);
     if (!navItem) return;
     const textEl = navItem.querySelector('.nav-item-text');
     const oldTitle = chatHistoryData[chatId].title;
