@@ -85,7 +85,7 @@ class CanvasManager {
 
         if (strategy === 'latex') {
             // Browser PDF viewers are often blocked in sandboxed iframes.
-            iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox');
+            iframe.removeAttribute('sandbox');
         } else {
             iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-same-origin');
         }
@@ -458,7 +458,8 @@ class CanvasManager {
         this._latexPdfPreviewUrl = objectUrl;
 
         if (this._isMobileViewport()) {
-            // Mobile Chrome often cannot render blob PDFs inline inside an iframe.
+            // Mobile Chrome often cannot navigate iframe directly to blob PDFs.
+            // Render with <object> first, and keep an explicit open fallback.
             iframe.src = 'about:blank';
             iframe.srcdoc = `<!DOCTYPE html>
 <html>
@@ -477,8 +478,23 @@ class CanvasManager {
             font-family: system-ui, -apple-system, sans-serif;
             background: #0f172a;
             color: #cbd5e1;
-            padding: 20px;
+            padding: 12px;
             box-sizing: border-box;
+        }
+        .pdf-frame {
+            width: 100%;
+            height: calc(100vh - 180px);
+            border: none;
+            background: #fff;
+            border-radius: 12px;
+        }
+        .fallback {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 14px;
         }
         .badge {
             width: 56px;
@@ -510,15 +526,21 @@ class CanvasManager {
     </style>
 </head>
 <body>
-    <div class="badge">PDF</div>
-    <button class="open-btn" id="openPdfBtn" type="button">Open</button>
-    <div class="hint">Mobile browsers may not display PDF inline in the preview pane.</div>
+    <object class="pdf-frame" data=${JSON.stringify(objectUrl)} type="application/pdf">
+        <div class="fallback">
+            <div class="badge">PDF</div>
+            <button class="open-btn" id="openPdfBtn" type="button">Open</button>
+            <div class="hint">If inline preview is unavailable on your browser, open the PDF in a new tab.</div>
+        </div>
+    </object>
     <script>
         const pdfUrl = ${JSON.stringify(objectUrl)};
         const openBtn = document.getElementById('openPdfBtn');
-        openBtn.addEventListener('click', () => {
-            window.open(pdfUrl, '_blank');
-        });
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                window.open(pdfUrl, '_blank');
+            });
+        }
     </script>
 </body>
 </html>`;
