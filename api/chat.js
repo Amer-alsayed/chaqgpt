@@ -40,7 +40,7 @@ module.exports = async function handler(request, response) {
       body: JSON.stringify({
         model,
         messages,
-        max_tokens: 16384,
+        max_tokens: 42000,
         // ✅ The crucial change: enable streaming
         stream: true,
       }),
