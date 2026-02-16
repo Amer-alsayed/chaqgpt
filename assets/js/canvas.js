@@ -47,6 +47,9 @@ const LANGUAGE_CONFIG = {
     clojure: { label: 'Clojure', icon: '🔄', strategy: 'piston', color: '#5881d8', pistonLang: 'clojure' },
     fsharp: { label: 'F#', icon: '🔷', strategy: 'piston', color: '#b845fc', pistonLang: 'fsharp' },
     powershell: { label: 'PowerShell', icon: '💲', strategy: 'piston', color: '#012456', pistonLang: 'powershell' },
+    // LaTeX — server-side compile for preview and PDF download
+    latex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
+    tex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
 };
 
 // ─── Pyodide State ───────────────────────────────────────────────
@@ -65,11 +68,26 @@ class CanvasManager {
         this.activeTab = 'code';
         this.consoleOutput = [];
         this.isRunning = false;
+        this._latexPdfPreviewUrl = null;
+        this._lastLatexCompile = null;
+        this._latexRunId = 0;
         // Init resize after DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this._initResize());
         } else {
             this._initResize();
+        }
+    }
+
+    _setPreviewSandboxForStrategy(strategy) {
+        const iframe = document.querySelector('.canvas-preview-iframe');
+        if (!iframe) return;
+
+        if (strategy === 'latex') {
+            // Browser PDF viewers are often blocked in sandboxed iframes.
+            iframe.removeAttribute('sandbox');
+        } else {
+            iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-same-origin');
         }
     }
 
@@ -103,14 +121,17 @@ class CanvasManager {
         if (config.strategy === 'web') {
             this.switchTab('preview');
             this._runWeb(code, lang);
+        } else if (config.strategy === 'latex') {
+            this.switchTab('preview');
+            this._runLatex(code);
         } else {
             this.switchTab('code');
         }
 
-        // Show PDF download button only for web/HTML content
+        // Show PDF download button for web/HTML and LaTeX content
         const pdfBtn = panel.querySelector('.canvas-pdf-btn');
         if (pdfBtn) {
-            pdfBtn.style.display = config.strategy === 'web' ? '' : 'none';
+            pdfBtn.style.display = (config.strategy === 'web' || config.strategy === 'latex') ? '' : 'none';
         }
 
         // Clear console
@@ -157,7 +178,13 @@ class CanvasManager {
 
         // Clean up iframe
         const iframe = panel.querySelector('.canvas-preview-iframe');
-        if (iframe) iframe.srcdoc = '';
+        if (iframe) {
+            this._setPreviewSandboxForStrategy('web');
+            iframe.src = 'about:blank';
+            iframe.srcdoc = '';
+        }
+        this._latexRunId++;
+        this._revokeLatexPreviewUrl();
     }
 
     toggleFullscreen() {
@@ -287,6 +314,9 @@ class CanvasManager {
                     await this._runPiston(this.currentCode, config.pistonLang || this.currentLang);
                     this.switchTab('console');
                     break;
+                case 'latex':
+                    await this._runLatex(this.currentCode);
+                    break;
                 default:
                     this._log('error', `Unsupported language: ${this.currentLang}`);
                     this.switchTab('console');
@@ -305,6 +335,7 @@ class CanvasManager {
     _runWeb(code, lang) {
         const iframe = document.querySelector('.canvas-preview-iframe');
         if (!iframe) return;
+        this._setPreviewSandboxForStrategy('web');
 
         let htmlContent = code;
 
@@ -347,6 +378,223 @@ class CanvasManager {
         iframe.srcdoc = htmlContent;
         this._log('info', '✨ Preview loaded');
         this._renderConsole();
+    }
+
+    // ─── LaTeX Preview (Server PDF) ──────────────────────────────
+    // LaTeX preview now compiles on the server and renders as PDF in iframe.
+    async _runLatex(code) {
+        const latexCode = String(code || '');
+        const runId = ++this._latexRunId;
+
+        this._setPreviewSandboxForStrategy('latex');
+        this.switchTab('preview');
+        this._showLatexLoading();
+        this._log('info', 'Compiling LaTeX preview...');
+        this._renderConsole();
+
+        try {
+            const { blob, fromCache } = await this._compileLatex(latexCode, 'pdflatex', { useCache: true });
+            if (runId !== this._latexRunId) return;
+
+            this._showLatexPdfPreview(URL.createObjectURL(blob));
+            this._log('info', fromCache ? 'LaTeX preview ready (cached)' : 'LaTeX preview ready');
+        } catch (err) {
+            if (runId !== this._latexRunId) return;
+            const message = err && err.message ? err.message : 'LaTeX preview failed';
+            this._showLatexPreviewError(message);
+            this._log('error', 'LaTeX preview failed:\n' + message);
+            this.switchTab('console');
+        } finally {
+            if (runId === this._latexRunId) {
+                this._renderConsole();
+            }
+        }
+    }
+
+    _showLatexLoading() {
+        const iframe = document.querySelector('.canvas-preview-iframe');
+        if (!iframe) return;
+
+        this._revokeLatexPreviewUrl();
+        iframe.src = 'about:blank';
+        iframe.srcdoc = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #475569; }
+        .latex-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #dbeafe;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="latex-loading">
+        <div class="spinner"></div>
+        <div>Compiling LaTeX preview...</div>
+    </div>
+</body>
+</html>`;
+    }
+
+    _showLatexPdfPreview(objectUrl) {
+        const iframe = document.querySelector('.canvas-preview-iframe');
+        if (!iframe) return;
+        this._setPreviewSandboxForStrategy('latex');
+
+        this._revokeLatexPreviewUrl();
+        this._latexPdfPreviewUrl = objectUrl;
+
+        // Important: srcdoc takes precedence over src when present.
+        iframe.removeAttribute('srcdoc');
+        iframe.src = objectUrl;
+    }
+
+    _showLatexPreviewError(message) {
+        const iframe = document.querySelector('.canvas-preview-iframe');
+        if (!iframe) return;
+
+        this._revokeLatexPreviewUrl();
+        const safeMsg = this._escapeHtml(message || 'Unknown LaTeX compilation error');
+        iframe.src = 'about:blank';
+        iframe.srcdoc = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; padding: 20px; font-family: system-ui, -apple-system, sans-serif; background: #fff; color: #1f2937; }
+        .error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            border-radius: 10px;
+            padding: 16px;
+            white-space: pre-wrap;
+            line-height: 1.45;
+        }
+        .hint { margin-top: 12px; color: #475569; }
+    </style>
+</head>
+<body>
+    <div class="error">${safeMsg}</div>
+    <div class="hint">Check the Console tab for full compile logs.</div>
+</body>
+</html>`;
+    }
+
+    _revokeLatexPreviewUrl() {
+        if (this._latexPdfPreviewUrl) {
+            URL.revokeObjectURL(this._latexPdfPreviewUrl);
+            this._latexPdfPreviewUrl = null;
+        }
+    }
+
+    _getLatexCompileKey(code, compiler) {
+        return `${compiler}::${code}`;
+    }
+
+    _parseLatexErrorMessage(text, fallback) {
+        if (!text) return fallback;
+        if (text.startsWith('%PDF-') || text.includes('\n%PDF-')) {
+            return 'LaTeX service returned PDF data in an unexpected error response.';
+        }
+
+        try {
+            const parsed = JSON.parse(text);
+            return parsed.logs || parsed.error || parsed.message || fallback;
+        } catch (err) {
+            return text.length > 4000 ? text.slice(0, 4000) + '\n...(truncated)' : text;
+        }
+    }
+
+    async _compileLatex(code, compiler = 'pdflatex', options = {}) {
+        const useCache = options.useCache !== false;
+        const latexCode = String(code || '');
+        if (!latexCode.trim()) {
+            throw new Error('No LaTeX code to compile.');
+        }
+
+        const compileKey = this._getLatexCompileKey(latexCode, compiler);
+        if (useCache && this._lastLatexCompile && this._lastLatexCompile.key === compileKey && this._lastLatexCompile.blob) {
+            return { blob: this._lastLatexCompile.blob, fromCache: true };
+        }
+
+        const controller = new AbortController();
+        const timeoutMs = 65000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch('/api/latex', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: latexCode, compiler }),
+                signal: controller.signal
+            });
+
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            const isPdfContentType = contentType.includes('application/pdf') || contentType.includes('application/x-pdf');
+            const buffer = await response.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            // Some proxies prepend bytes before the PDF signature; scan an initial window.
+            const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+            const scanLimit = Math.min(bytes.length - 4, 1024);
+            let looksLikePdf = false;
+            for (let i = 0; i <= scanLimit; i++) {
+                if (
+                    bytes[i] === pdfSignature[0] &&
+                    bytes[i + 1] === pdfSignature[1] &&
+                    bytes[i + 2] === pdfSignature[2] &&
+                    bytes[i + 3] === pdfSignature[3] &&
+                    bytes[i + 4] === pdfSignature[4]
+                ) {
+                    looksLikePdf = true;
+                    break;
+                }
+            }
+
+            if (response.ok && (isPdfContentType || looksLikePdf)) {
+                const blob = new Blob([buffer], { type: 'application/pdf' });
+                if (!blob || blob.size === 0) {
+                    throw new Error('LaTeX compiler returned an empty PDF.');
+                }
+
+                this._lastLatexCompile = { key: compileKey, blob };
+                return { blob, fromCache: false };
+            }
+
+            const fallback = `HTTP ${response.status}: ${response.statusText || 'LaTeX compilation failed'}`;
+            if (looksLikePdf) {
+                throw new Error('LaTeX service returned PDF data with an unexpected HTTP status. Please try again.');
+            }
+
+            const isTextLike = contentType.includes('json') || contentType.includes('text') || contentType.includes('xml');
+            if (!isTextLike) {
+                throw new Error(fallback);
+            }
+
+            const bodyText = new TextDecoder('utf-8').decode(buffer);
+            const errorMsg = this._parseLatexErrorMessage(bodyText, fallback);
+            throw new Error(errorMsg || fallback);
+        } catch (err) {
+            if (err && err.name === 'AbortError') {
+                throw new Error('LaTeX compilation timed out after 65 seconds.');
+            }
+            if (err && err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
+                throw new Error('Unable to reach the LaTeX service. Check your connection and try again.');
+            }
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     async _runJavaScript(code) {
@@ -657,6 +905,12 @@ sys.stderr = io.StringIO()
     }
 
     async downloadPDF() {
+        // For LaTeX content, use server-side compilation for a proper PDF
+        const config = this.getConfig(this.currentLang);
+        if (config.strategy === 'latex') {
+            return this._downloadLatexPDF();
+        }
+
         const sourceIframe = document.querySelector('.canvas-preview-iframe');
         if (!sourceIframe || !sourceIframe.srcdoc) {
             alert('No HTML preview to download. Click Run first!');
@@ -756,6 +1010,46 @@ sys.stderr = io.StringIO()
             alert('Failed to generate PDF: ' + err.message);
         } finally {
             // Restore button
+            if (pdfBtn) {
+                pdfBtn.disabled = false;
+                pdfBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PDF';
+            }
+        }
+    }
+
+    // ─── LaTeX PDF Download (server-side compilation) ────────────
+    async _downloadLatexPDF() {
+        if (!this.currentCode || !this.currentCode.trim()) {
+            alert('No LaTeX code to compile.');
+            return;
+        }
+
+        const pdfBtn = document.querySelector('.canvas-pdf-btn');
+        if (pdfBtn) {
+            pdfBtn.disabled = true;
+            pdfBtn.innerHTML = '<span class="canvas-run-spinner"></span> Compiling...';
+        }
+
+        try {
+            const { blob, fromCache } = await this._compileLatex(this.currentCode, 'pdflatex', { useCache: true });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `latex-document-${Date.now()}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            this._log('info', fromCache ? 'PDF downloaded successfully (cached compile)' : 'PDF downloaded successfully');
+            this._renderConsole();
+        } catch (err) {
+            console.error('LaTeX PDF download failed:', err);
+            this._log('error', 'LaTeX PDF download failed:\n' + (err && err.message ? err.message : 'Unknown error'));
+            this._renderConsole();
+            this.switchTab('console');
+            alert('Failed to compile LaTeX: ' + err.message);
+        } finally {
             if (pdfBtn) {
                 pdfBtn.disabled = false;
                 pdfBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PDF';

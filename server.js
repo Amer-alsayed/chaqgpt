@@ -18,6 +18,7 @@ app.use(express.static(path.join(__dirname, '.')));
 const chatHandler = require('./api/chat');
 const modelsHandler = require('./api/models');
 const executeHandler = require('./api/execute');
+const latexHandler = require('./api/latex');
 
 // Mount the API handler
 app.get('/api/models', async (req, res) => {
@@ -47,6 +48,17 @@ app.post('/api/execute', async (req, res) => {
     await executeHandler(req, res);
   } catch (error) {
     console.error('Error in /api/execute handler:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
+
+app.post('/api/latex', async (req, res) => {
+  try {
+    await latexHandler(req, res);
+  } catch (error) {
+    console.error('Error in /api/latex handler:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal Server Error' });
     }
