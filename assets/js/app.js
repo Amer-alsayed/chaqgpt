@@ -516,16 +516,42 @@ window.stopGeneration = function () {
     shouldStopTyping = true;
     if (abortController) abortController.abort();
     removeTypingIndicator();
-    document.getElementById('stopGenerating').classList.remove('show');
     isProcessing = false;
-    document.getElementById('sendButton').disabled = false;
+    updateSendButtonState();
 }
 
 window.handleInput = function () {
     const input = document.getElementById('messageInput');
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 200) + 'px';
-    document.getElementById('sendButton').classList.toggle('active', input.value.trim() !== '' || pendingImages.length > 0);
+    updateSendButtonState();
+}
+
+function updateSendButtonState() {
+    const sendButton = document.getElementById('sendButton');
+    if (!sendButton) return;
+    const input = document.getElementById('messageInput');
+    const hasInput = input && (input.value.trim() !== '' || pendingImages.length > 0);
+
+    if (isProcessing) {
+        sendButton.disabled = false;
+        sendButton.classList.add('active');
+        sendButton.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg>`;
+        sendButton.title = "Stop generating";
+    } else {
+        sendButton.disabled = !hasInput;
+        sendButton.classList.toggle('active', hasInput);
+        sendButton.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+        sendButton.title = "Send message";
+    }
+}
+
+window.handleSendClick = function() {
+    if (isProcessing) {
+        window.stopGeneration();
+    } else {
+        window.sendMessage();
+    }
 }
 
 window.handleKeyPress = function (event) {
@@ -534,14 +560,14 @@ window.handleKeyPress = function (event) {
         const isMobile = window.innerWidth <= 768 || ('ontouchstart' in window);
         if (isMobile) return; // let default newline happen
         event.preventDefault();
-        window.sendMessage();
+        window.handleSendClick();
     }
 }
 
 window.sendSuggestion = function (text) {
     document.getElementById('messageInput').value = text;
     window.handleInput();
-    window.sendMessage();
+    window.handleSendClick();
 }
 
 window.newChat = function () {
@@ -970,8 +996,7 @@ window.sendMessage = async function () {
     isAutoScrollEnabled = true;
 
     isProcessing = true;
-    document.getElementById('sendButton').disabled = true;
-    document.getElementById('stopGenerating').classList.add('show');
+    updateSendButtonState();
     showTypingIndicator();
 
     let assistantMessageContent = '';
@@ -1249,8 +1274,7 @@ ${canvas.code}
     } finally {
         isProcessing = false;
         shouldStopTyping = false;
-        document.getElementById('sendButton').disabled = false;
-        document.getElementById('stopGenerating').classList.remove('show');
+        updateSendButtonState();
         abortController = null;
     }
 }
