@@ -628,580 +628,7 @@ function addUserMessage(content, images = []) {
     if (images.length > 0) {
         imagesHtml = '<div class="user-message-images">' + images.map(img => `<img src="${img}" alt="Attached image" class="user-attached-image" onclick="window.openImageLightbox(this.src)">`).join('') + '</div>';
     }
-    messageGroup.innerHTML = `<div class="user-message-content"><div class="user-message-bubble">${imagesHtml}<div class="user-message-text">${escapeHtml(content)}</div></div><div class="assistant-actions"><button class="assistant-action-btn" onclick="window.copyUserMessage(this)"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg></button></div></div>`;
-    messagesContainer.appendChild(messageGroup);
-    if (isScrolledToBottom) scrollToBottom(true);
-}
-
-// --- Core Logic ---
-
-async function addAssistantMessage(content, showTyping = true) {
-    initMessagesContainer();
-    const messageGroup = document.createElement('div');
-    messageGroup.className = 'message-group assistant';
-    const chatArea = document.getElementById('chatArea');
-
-    let thinkingContent = '';
-    let finalContent = content;
-    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
-    if (thinkMatch) {
-        thinkingContent = thinkMatch[1].trim();
-        finalContent = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
-    }
-
-    let html = '<div class="assistant-message-content">';
-    if (thinkingContent) {
-        html += `
-            <div class="thinking-section">
-                <div class="thinking-header" onclick="window.toggleThinking(this)">
-                    <svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg>
-                    <span class="thinking-label">Thought</span>
-                    <svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 9l-7 7-7-7" stroke-width="2" stroke-linecap="round"/></svg>
-                </div>
-                <div class="thinking-content"><div>${formatThinkingContent(thinkingContent)}</div></div>
-            </div>`;
-    }
-
-    html += `
-        <div class="assistant-message-text"></div>
-        <div class="assistant-actions">
-            <button class="assistant-action-btn" onclick="window.copyAssistantMessage(this)">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg>
-            </button>
-            <button class="assistant-action-btn" title="Copy rich text for Google Docs" onclick="window.copyAssistantForDocs(this)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-width="2"/><path d="M14 2v6h6" stroke-width="2"/><path d="M8 13h8M8 17h8M8 9h3" stroke-width="2" stroke-linecap="round"/></svg>
-            </button>
-        </div>
-    </div>`;
-
-    messageGroup.innerHTML = html;
-    messagesContainer.appendChild(messageGroup);
-    const textDiv = messageGroup.querySelector('.assistant-message-text');
-
-    if (showTyping) {
-        const chunkSize = 5;
-        let displayedText = '';
-        for (let i = 0; i < finalContent.length; i += chunkSize) {
-            if (shouldStopTyping) break;
-            const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
-            displayedText += finalContent.substring(i, i + chunkSize);
-            textDiv.innerHTML = formatContent(displayedText);
-            try { renderMathInElement(textDiv, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false }); } catch (e) { }
-            if (isScrolledToBottom) chatArea.scrollTop = chatArea.scrollHeight;
-            await new Promise(resolve => setTimeout(resolve, 8));
-        }
-        if (!shouldStopTyping) textDiv.innerHTML = formatContent(finalContent);
-    } else {
-        textDiv.innerHTML = canvasMode ? formatContentForCanvas(finalContent) : formatContent(finalContent);
-    }
-
-    renderMathInElement(messageGroup, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false });
-    messageGroup.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
-
-    const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
-    if (isScrolledToBottom) scrollToBottom(true);
-}
-
-function showTypingIndicator() {
-    initMessagesContainer();
-    const chatArea = document.getElementById('chatArea');
-    const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
-    const messageGroup = document.createElement('div');
-    messageGroup.className = 'message-group assistant';
-    messageGroup.id = 'typing-indicator-group';
-    const currentModelData = availableModels.find(m => m.id === currentModel);
-    let html = '<div class="assistant-message-content">';
-    if (currentModelData?.supportsThinking) html += `<div class="thinking-section"><div class="thinking-header"><svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg><span class="thinking-label">Thinking</span><div class="thinking-spinner"><span></span><span></span><span></span></div></div></div>`;
-    html += `<div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
-    messageGroup.innerHTML = html;
-    messagesContainer.appendChild(messageGroup);
-    if (isScrolledToBottom) scrollToBottom(true);
-}
-
-function removeTypingIndicator() { const indicator = document.getElementById('typing-indicator-group'); if (indicator) indicator.remove(); }
-window.toggleThinking = function (header) { header.nextElementSibling.classList.toggle('show'); header.querySelector('.thinking-toggle').classList.toggle('expanded'); }
-window.copyCode = function (button, code) { navigator.clipboard.writeText(code).then(() => { const originalText = button.innerHTML; button.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`; button.classList.add('copied'); setTimeout(() => { button.innerHTML = originalText; button.classList.remove('copied'); }, 2000); }); }
-
-window.toggleCanvasMode = function () {
-    canvasMode = !canvasMode;
-    const btn = document.getElementById('canvasToggle');
-    if (btn) {
-        btn.classList.toggle('active', canvasMode);
-        btn.title = canvasMode
-            ? 'Canvas mode ON — AI will edit code directly'
-            : 'Enable canvas mode — AI can edit code directly';
-    }
-};
-
-window.applyToCanvas = function (code, lang) {
-    if (typeof window.getCanvasState === 'function' && window.getCanvasState().isOpen) {
-        // Canvas is open — update the code in place
-        window.updateCanvasCode(code);
-        window.switchCanvasTab('code');
-    } else {
-        // Canvas not open — open it with this code
-        window.openCanvas(code, lang);
-    }
-};
-
-// Agent-style canvas: extract code blocks, auto-apply to canvas, show only text in chat
-function formatContentForCanvas(raw) {
-    if (!raw) return '<p></p>';
-
-    // Extract all code blocks
-    const codeBlocks = [];
-    const textOnly = raw.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        codeBlocks.push({ lang: (lang || 'html').toLowerCase(), code: code.trim() });
-        return ''; // Remove code block from text
-    });
-
-    // Auto-apply the best code block to canvas
-    if (codeBlocks.length > 0) {
-        // Pick the largest code block (most likely the main one)
-        const best = codeBlocks.reduce((a, b) => a.code.length >= b.code.length ? a : b);
-
-        // Use setTimeout so canvas updates after DOM render completes
-        setTimeout(() => {
-            if (typeof window.updateCanvasCodeAndPreview === 'function') {
-                window.updateCanvasCodeAndPreview(best.code, best.lang);
-            }
-        }, 100);
-    }
-
-    // Clean up the remaining text (remove excess whitespace from stripped blocks)
-    let cleanText = textOnly.replace(/\n{3,}/g, '\n\n').trim();
-
-    // If no text left, just return the badge
-    if (!cleanText) {
-        return `<div class="canvas-applied-badge" onclick="window.openCanvasPreview()" style="cursor:pointer" title="Click to open canvas preview">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 6L9 17l-5-5"/>
-            </svg>
-            Code applied to canvas
-        </div>`;
-    }
-
-    // Format the remaining text normally
-    let result = formatContent(cleanText);
-
-    // Append "applied to canvas" badge if we extracted code
-    if (codeBlocks.length > 0) {
-        result += `<div class="canvas-applied-badge" onclick="window.openCanvasPreview()" style="cursor:pointer" title="Click to open canvas preview">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 6L9 17l-5-5"/>
-            </svg>
-            Code applied to canvas
-        </div>`;
-    }
-
-    return result;
-}
-
-function formatContent(raw) {
-    if (!raw) return '<p></p>';
-
-    // 1. Extract code blocks BEFORE escaping (preserve raw content)
-    const blocks = [];
-    let text = raw.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        blocks.push({ lang: (lang || 'plaintext').toLowerCase(), code: code.trim() });
-        return `\n[[[BLOCK_${blocks.length - 1}]]]\n`;
-    });
-
-    // 2. Extract math expressions BEFORE escaping to preserve LaTeX
-    const mathBlocks = [];
-    // Display math: \[...\] (LaTeX standard, can span multiple lines)
-    text = text.replace(/\\\[([\s\S]*?)\\\]/g, (match, math) => {
-        mathBlocks.push({ display: true, content: math, delim: '\\[' });
-        return `\n[[[MATH_${mathBlocks.length - 1}]]]\n`;
-    });
-    // Display math: $$...$$ (can span multiple lines)
-    text = text.replace(/\$\$([\s\S]*?)\$\$/g, (match, math) => {
-        mathBlocks.push({ display: true, content: math, delim: '$$' });
-        return `\n[[[MATH_${mathBlocks.length - 1}]]]\n`;
-    });
-    // Inline math: \(...\) (LaTeX standard)
-    text = text.replace(/\\\(([\s\S]*?)\\\)/g, (match, math) => {
-        mathBlocks.push({ display: false, content: math, delim: '\\(' });
-        return `[[[MATH_${mathBlocks.length - 1}]]]`;
-    });
-    // Inline math: $...$ (single line, not greedy)
-    text = text.replace(/\$([^\$\n]+?)\$/g, (match, math) => {
-        mathBlocks.push({ display: false, content: math, delim: '$' });
-        return `[[[MATH_${mathBlocks.length - 1}]]]`;
-    });
-
-    // 3. Now escape HTML (math and code are safely extracted)
-    text = escapeHtml(text);
-
-    // 4. Inline code
-    text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // 5. Markdown formatting
-    text = text
-        .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
-        .replace(/^[\s]*[-*]\s+(.+)$/gm, '<li>$1</li>')
-        .replace(/(<li>.*?<\/li>\n?)+/gs, match => match.includes('1.') ? `<ol>${match}</ol>` : `<ul>${match}</ul>`)
-        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
-    // 5b. Horizontal rules
-    text = text.replace(/^---$/gm, '<hr>');
-
-    // 5c. Markdown tables
-    text = text.replace(/((?:^\|.+\|[ \t]*$\n?)+)/gm, (tableBlock) => {
-        const rows = tableBlock.trim().split('\n').filter(r => r.trim());
-        if (rows.length < 2) return tableBlock;
-        // Check if second row is a separator (|---|---|)
-        const sepRow = rows[1].trim();
-        if (!/^\|[\s\-:|]+\|$/.test(sepRow)) return tableBlock;
-
-        const parseRow = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-
-        const headers = parseRow(rows[0]);
-        let html = '<table><thead><tr>';
-        headers.forEach(h => { html += `<th>${h}</th>`; });
-        html += '</tr></thead><tbody>';
-
-        for (let i = 2; i < rows.length; i++) {
-            const cells = parseRow(rows[i]);
-            html += '<tr>';
-            cells.forEach(c => { html += `<td>${c}</td>`; });
-            html += '</tr>';
-        }
-        html += '</tbody></table>';
-        return html;
-    });
-
-    // 6. Paragraphs (skip math/code placeholders)
-    const paragraphs = text.split(/\n{2,}/).map(p => {
-        p = p.trim();
-        if (!p) return '';
-        if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol>') || p.startsWith('<blockquote>') || p.startsWith('<table') || p.startsWith('<hr') || p.startsWith('[[[BLOCK_') || p.startsWith('[[[MATH_')) return p;
-        return `<p>${p.replace(/\n/g, '<br>')}</p>`;
-    }).join('');
-
-    let html = paragraphs;
-
-    // 7. Restore math expressions (raw LaTeX, unescaped) with original delimiters
-    mathBlocks.forEach((m, idx) => {
-        const openDelim = m.delim;
-        const closeDelim = m.delim === '\\[' ? '\\]' : m.delim === '\\(' ? '\\)' : m.delim;
-        html = html.replace(`[[[MATH_${idx}]]]`, `${openDelim}${m.content}${closeDelim}`);
-    });
-
-    // 8. Restore code blocks (escape code content for safe display)
-    blocks.forEach((b, idx) => {
-        const langClass = `language-${b.lang}`;
-        const codeJson = JSON.stringify(b.code).replace(/"/g, '&quot;');
-        const langJson = JSON.stringify(b.lang).replace(/"/g, '&quot;');
-        const replacement = `<div class="code-block-wrapper">
-                                <div class="code-block-header">
-                                    <span class="code-language">${b.lang === 'plaintext' ? 'text' : b.lang}</span>
-                                    <div class="code-block-actions">
-                                        <button class="code-run-btn" onclick="window.openCanvas(${codeJson}, ${langJson})" title="Run code">
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-                                            Run
-                                        </button>
-                                        <button class="code-copy-btn" onclick="window.copyCode(this, ${codeJson})">
-                                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg>
-                                        </button>
-                                    </div>
-                                </div>
-                                <pre><code class="${langClass}">${escapeHtml(b.code)}</code></pre>
-                             </div>`;
-        html = html.replace(`[[[BLOCK_${idx}]]]`, replacement);
-    });
-    return html || '<p></p>';
-}
-
-
-window.sendMessage = async function () {
-    const input = document.getElementById('messageInput');
-    const message = input.value.trim();
-    const images = [...pendingImages]; // snapshot before clearing
-    if ((!message && images.length === 0) || isProcessing) return;
-
-    shouldStopTyping = false;
-    abortController = new AbortController();
-
-    if (!currentChatId && !window.isTempChat) {
-        currentChatId = Date.now().toString();
-        chatHistoryData[currentChatId] = {
-            title: message.substring(0, 30) + (message.length > 30 ? '...' : ''),
-            messages: [],
-            createdAt: Date.now()
-        };
-    }
-
-    addUserMessage(message, images);
-    input.value = '';
-    input.style.height = 'auto';
-    pendingImages = [];
-    updateImagePreview();
-    handleInput();
-
-    // Build message content for API
-    let messageContent;
-    if (images.length > 0) {
-        // OpenRouter multi-part content format for vision models
-        messageContent = [];
-        images.forEach(img => {
-            messageContent.push({ type: 'image_url', image_url: { url: img } });
-        });
-        if (message) {
-            messageContent.push({ type: 'text', text: message });
-        }
-    } else {
-        messageContent = message;
-    }
-    conversationHistory.push({ role: 'user', content: messageContent });
-
-    // Reset accumulated content for new turn
-    accumulatedContent = '';
-    accumulatedReasoning = '';
-    insideThinkTag = false;
-    renderQueue = [];
-    isRendering = false;
-    isAutoScrollEnabled = true;
-
-    isProcessing = true;
-    document.getElementById('sendButton').disabled = true;
-    document.getElementById('stopGenerating').classList.add('show');
-    showTypingIndicator();
-
-    let assistantMessageContent = '';
-    let messageGroup;
-
-    try {
-        // Build messages with optional canvas context
-        let messagesForAPI = [...conversationHistory];
-
-        // If canvas mode is ON, inject code context
-        if (canvasMode) {
-            let canvasSystemContent;
-            // Check if canvas is open with code
-            if (typeof window.getCanvasState === 'function') {
-                const canvas = window.getCanvasState();
-                if (canvas.isOpen && canvas.code) {
-                    canvasSystemContent = `You are in CANVAS MODE editing ${canvas.langLabel} code. The user's current code is shown below. CRITICAL RULES:
-1. When the user asks for a change, output the COMPLETE updated file in a single \`\`\`${canvas.lang} code block. Include ALL the original code with the requested modifications applied.
-2. Modify ONLY the parts the user asks about — keep everything else EXACTLY as-is.
-3. Put your explanation text OUTSIDE the code block (before or after).
-4. Keep explanations brief — focus on what you changed and why.
-
-Current code in canvas:
-\`\`\`${canvas.lang}
-${canvas.code}
-\`\`\``;
-                } else {
-                    canvasSystemContent = 'You are in CANVAS MODE. Write clean, complete, runnable code in a single fenced code block with correct language tag. Keep explanations brief.';
-                }
-            } else {
-                canvasSystemContent = 'You are in CANVAS MODE. Write clean, complete, runnable code in a single fenced code block with correct language tag. Keep explanations brief.';
-            }
-            messagesForAPI = [{ role: 'system', content: canvasSystemContent }, ...messagesForAPI];
-        }
-
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: currentModel,
-                messages: messagesForAPI
-            }),
-            signal: abortController.signal
-        });
-
-        removeTypingIndicator();
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({ error: { message: 'An unknown error occurred.' } }));
-            throw new Error(error.error.message);
-        }
-
-        initMessagesContainer();
-        messageGroup = document.createElement('div');
-        messageGroup.className = 'message-group assistant';
-
-        // Always create thinking section (hidden), reveal dynamically when reasoning arrives
-        let thinkingStartTime = null;
-        let thinkingTimerInterval = null;
-        let thinkingEndTime = null;
-        let initialHtml = `<div class="assistant-message-content">
-                <div class="thinking-section" id="live-thinking-section" style="display:none;">
-                    <div class="thinking-header" onclick="window.toggleThinking(this)">
-                        <svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg>
-                        <span class="thinking-label">Thinking</span>
-                        <div class="thinking-spinner"><span></span><span></span><span></span></div>
-                        <svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 9l-7 7-7-7" stroke-width="2" stroke-linecap="round"/></svg>
-                    </div>
-                    <div class="thinking-content" id="live-thinking-content"><div></div></div>
-                </div>
-                <div class="assistant-message-text"></div>
-            </div> `;
-
-        messageGroup.innerHTML = initialHtml;
-        messagesContainer.appendChild(messageGroup);
-        const assistantMessageContainer = messageGroup.querySelector('.assistant-message-text');
-        const thinkingContentContainer = messageGroup.querySelector('#live-thinking-content');
-        const thinkingSection = messageGroup.querySelector('#live-thinking-section');
-        let thinkingRevealed = false;
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        // Track full content locally for history saving
-        let reasoningContent = '';
-        let fullAssistantContent = '';
-
-        // --- Loop / repetition detection ---
-        let loopCheckCounter = 0;
-        const LOOP_CHECK_INTERVAL = 200; // Check every N content chars
-        const LOOP_PATTERN_MIN_LEN = 40; // Minimum pattern length to detect
-        const LOOP_REPEAT_THRESHOLD = 3; // Repeats needed to trigger abort
-        let loopDetected = false;
-
-        function detectLoop(text) {
-            if (text.length < LOOP_PATTERN_MIN_LEN * LOOP_REPEAT_THRESHOLD) return false;
-            // Check for repeating patterns in the last portion of text
-            const tail = text.slice(-800);
-            for (let patLen = LOOP_PATTERN_MIN_LEN; patLen <= Math.floor(tail.length / LOOP_REPEAT_THRESHOLD); patLen++) {
-                const pattern = tail.slice(-patLen);
-                let count = 0;
-                let pos = tail.length - patLen;
-                while (pos >= 0) {
-                    if (tail.slice(pos, pos + patLen) === pattern) {
-                        count++;
-                        pos -= patLen;
-                    } else {
-                        break;
-                    }
-                }
-                if (count >= LOOP_REPEAT_THRESHOLD) return true;
-            }
-            return false;
-        }
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done || shouldStopTyping) {
-                if (shouldStopTyping) reader.cancel();
-                break;
-            }
-
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.substring(6);
-                    if (data.trim() === '[DONE]') break;
-                    try {
-                        const parsed = JSON.parse(data);
-                        const delta = parsed.choices[0]?.delta;
-
-                        // Push to render queue for UI
-                        if (delta) {
-                            renderQueue.push(delta);
-                            if (!isRendering) processRenderQueue(assistantMessageContainer, thinkingContentContainer, thinkingSection, () => {
-                                if (!thinkingStartTime) thinkingStartTime = Date.now();
-                                thinkingRevealed = true;
-                            });
-
-                            // Synchronously accumulate for history
-                            if (delta.reasoning_content || delta.reasoning) {
-                                if (!thinkingStartTime) thinkingStartTime = Date.now();
-                                _thinkingStartRef = thinkingStartTime;
-                                // Start live thinking timer (only once)
-                                if (!thinkingTimerInterval && thinkingSection) {
-                                    const labelEl = thinkingSection.querySelector('.thinking-label');
-                                    if (labelEl) {
-                                        thinkingTimerInterval = setInterval(() => {
-                                            const elapsed = Math.round((Date.now() - thinkingStartTime) / 1000);
-                                            labelEl.textContent = `Thinking... ${elapsed}s`;
-                                        }, 1000);
-                                        _thinkingTimerRef = thinkingTimerInterval;
-                                    }
-                                }
-                                reasoningContent += (delta.reasoning_content || delta.reasoning);
-                            }
-                            // Also start timer for <think> tags in content
-                            if (delta.content && delta.content.includes('<think>') && !thinkingTimerInterval && thinkingSection) {
-                                if (!thinkingStartTime) thinkingStartTime = Date.now();
-                                _thinkingStartRef = thinkingStartTime;
-                                const labelEl = thinkingSection.querySelector('.thinking-label');
-                                if (labelEl) {
-                                    thinkingTimerInterval = setInterval(() => {
-                                        const elapsed = Math.round((Date.now() - thinkingStartTime) / 1000);
-                                        labelEl.textContent = `Thinking... ${elapsed}s`;
-                                    }, 1000);
-                                    _thinkingTimerRef = thinkingTimerInterval;
-                                }
-                            }
-                            if (delta.content) {
-                                fullAssistantContent += delta.content;
-                                // Loop detection: check periodically
-                                loopCheckCounter += delta.content.length;
-                                if (loopCheckCounter >= LOOP_CHECK_INTERVAL) {
-                                    loopCheckCounter = 0;
-                                    if (detectLoop(fullAssistantContent)) {
-                                        loopDetected = true;
-                                        reader.cancel();
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e) { }
-                }
-            }
-            if (loopDetected) break;
-        }
-
-        // Wait for render queue to drain before finalizing
-        while (renderQueue.length > 0 || isRendering) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-
-        // Use accumulated values from the render engine (which already parsed <think> tags in real-time)
-        // Read AFTER drain so all reasoning is captured
-        let thinkingContent = accumulatedReasoning || reasoningContent;
-        let finalContent = accumulatedContent || fullAssistantContent;
-
-        // Build final HTML
-        // Stop live thinking timer if still running
-        if (thinkingTimerInterval) { clearInterval(thinkingTimerInterval); thinkingTimerInterval = null; }
-        // Use saved end time (when content started) or fall back to now
-        const thinkingDuration = thinkingStartTime ? Math.round(((thinkingEndTime || _thinkingEndTimeRef || Date.now()) - thinkingStartTime) / 1000) : null;
-        const thinkingLabel = thinkingDuration ? `Thought for ${thinkingDuration}s` : 'Thought';
-
-        let finalHtml = '<div class="assistant-message-content">';
-
-        if (thinkingContent || thinkingStartTime) {
-            finalHtml += `
-    <div class="thinking-section">
-                    <div class="thinking-header" onclick="window.toggleThinking(this)">
-                        <svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg>
-                        <span class="thinking-label">${thinkingLabel}</span>
-                        <svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 9l-7 7-7-7" stroke-width="2" stroke-linecap="round"/></svg>
-                    </div>
-                    <div class="thinking-content"><div>${formatThinkingContent(thinkingContent)}</div></div>
-                </div>
-    `;
-        }
-
-        const formattedContent = canvasMode ? formatContentForCanvas(finalContent) : formatContent(finalContent);
-
-        finalHtml += `
-    <div class="assistant-message-text"> ${formattedContent}</div>
-        <div class="assistant-actions">
-            <button class="assistant-action-btn" onclick="window.copyAssistantMessage(this)">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg>
+    messageGroup.innerHTML = `<div class="user-message-content"><div class="user-message-bubble">${imagesHtml}<div class="user-message-text">${escapeHtml(content)}</div></div><div class="assistant-actions"><button class="assistant-action-btn" onclick="window.copyUserMessage(this)"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg>
             </button>
             <button class="assistant-action-btn" title="Copy rich text for Google Docs" onclick="window.copyAssistantForDocs(this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-width="2"/><path d="M14 2v6h6" stroke-width="2"/><path d="M8 13h8M8 17h8M8 9h3" stroke-width="2" stroke-linecap="round"/></svg>
@@ -1258,6 +685,8 @@ ${canvas.code}
 // Adaptive Render Engine
 let accumulatedContent = '';
 let accumulatedReasoning = '';
+let displayedContentLength = 0;
+let displayedReasoningLength = 0;
 let insideThinkTag = false;
 let _thinkingTimerRef = null; // module-level ref so processRenderQueue can stop it
 let _thinkingStartRef = null;
@@ -1313,28 +742,27 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
     isRendering = true;
 
     const process = () => {
-        if (renderQueue.length === 0 || shouldStopTyping) {
+        // Stop if user cancelled
+        if (shouldStopTyping) {
             isRendering = false;
             return;
         }
 
-        const queueSize = renderQueue.length;
-        const processCount = queueSize > 50 ? 20 : (queueSize > 20 ? 10 : (queueSize > 5 ? 2 : 1));
+        // 1. Process ALL pending network chunks immediately to update accumulated state
+        let hasNewReasoningData = false;
+        let hasNewContentData = false;
 
-        let hasContentUpdate = false;
-        let hasReasoningUpdate = false;
-
-        for (let i = 0; i < processCount && renderQueue.length > 0; i++) {
+        while (renderQueue.length > 0) {
             const delta = renderQueue.shift();
 
             // Handle dedicated reasoning fields
             const reasoning = delta?.reasoning_content || delta?.reasoning;
             if (reasoning) {
                 accumulatedReasoning += reasoning;
-                hasReasoningUpdate = true;
+                hasNewReasoningData = true;
             }
 
-            // Handle content â€” parse <think> tags in real-time
+            // Handle content — parse <think> tags in real-time
             const content = delta?.content;
             if (content) {
                 let remaining = content;
@@ -1343,12 +771,12 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                         const closeIdx = remaining.indexOf('</think>');
                         if (closeIdx !== -1) {
                             accumulatedReasoning += remaining.substring(0, closeIdx);
-                            hasReasoningUpdate = true;
+                            hasNewReasoningData = true;
                             insideThinkTag = false;
                             remaining = remaining.substring(closeIdx + 8);
                         } else {
                             accumulatedReasoning += remaining;
-                            hasReasoningUpdate = true;
+                            hasNewReasoningData = true;
                             remaining = '';
                         }
                     } else {
@@ -1356,13 +784,13 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                         if (openIdx !== -1) {
                             if (openIdx > 0) {
                                 accumulatedContent += remaining.substring(0, openIdx);
-                                hasContentUpdate = true;
+                                hasNewContentData = true;
                             }
                             insideThinkTag = true;
                             remaining = remaining.substring(openIdx + 7);
                         } else {
                             accumulatedContent += remaining;
-                            hasContentUpdate = true;
+                            hasNewContentData = true;
                             remaining = '';
                         }
                     }
@@ -1370,20 +798,52 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
             }
         }
 
-        // Reveal thinking section as soon as reasoning arrives
-        if (hasReasoningUpdate && thinkingSection && thinkingSection.style.display === 'none') {
+        // 2. Smoothly advance displayed pointers
+        let hasVisualUpdate = false;
+
+        // Content Smoothing
+        const contentDiff = accumulatedContent.length - displayedContentLength;
+        if (contentDiff > 0) {
+            // Adaptive speed: at least 1 char, or 1/10th of the remaining buffer (eased catch-up)
+            const step = Math.max(1, Math.ceil(contentDiff / 10));
+            displayedContentLength += step;
+            hasVisualUpdate = true;
+        }
+
+        // Reasoning Smoothing
+        const reasoningDiff = accumulatedReasoning.length - displayedReasoningLength;
+        if (reasoningDiff > 0) {
+            const step = Math.max(1, Math.ceil(reasoningDiff / 10));
+            displayedReasoningLength += step;
+            hasVisualUpdate = true;
+        }
+
+        // If we have nothing left to render and nothing in queue, stop
+        if (!hasVisualUpdate && renderQueue.length === 0 && contentDiff <= 0 && reasoningDiff <= 0) {
+            isRendering = false;
+            return;
+        }
+
+        // Reveal thinking section as soon as reasoning arrives (even if not fully displayed yet)
+        if (accumulatedReasoning.length > 0 && thinkingSection && thinkingSection.style.display === 'none') {
             thinkingSection.style.display = '';
             if (onThinkingRevealed) onThinkingRevealed();
         }
 
-        if (hasReasoningUpdate && thinkingContainer) {
+        // 3. Update DOM with substrings
+
+        // Update Reasoning DOM
+        if (thinkingContainer && displayedReasoningLength > 0) {
+            const currentReasoningStr = accumulatedReasoning.substring(0, displayedReasoningLength);
             const innerDiv = thinkingContainer.querySelector('div');
-            if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedReasoning);
+            // Only update if changed (though with smoothing it usually changes every frame)
+            if (innerDiv) innerDiv.innerHTML = formatThinkingContent(currentReasoningStr);
         }
 
-        if (hasContentUpdate) {
+        // Update Content DOM
+        if (hasVisualUpdate && displayedContentLength > 0) {
             // Stop thinking timer when actual content starts arriving (reasoning ended)
-            if (_thinkingTimerRef && thinkingSection) {
+            if (_thinkingTimerRef && thinkingSection && accumulatedContent.length > 0) {
                 clearInterval(_thinkingTimerRef);
                 const elapsed = _thinkingStartRef ? Math.round((Date.now() - _thinkingStartRef) / 1000) : 0;
                 const labelEl = thinkingSection.querySelector('.thinking-label');
@@ -1391,9 +851,12 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                 _thinkingTimerRef = null;
                 _thinkingEndTimeRef = Date.now();
             }
+
+            const currentContentStr = accumulatedContent.substring(0, displayedContentLength);
+
             if (canvasMode) {
                 // In canvas mode, hide code blocks from live display
-                let liveText = accumulatedContent;
+                let liveText = currentContentStr;
                 // Remove completed code blocks
                 liveText = liveText.replace(/```[a-zA-Z0-9_+-]*\n[\s\S]*?```/g, '');
                 // If there's an unclosed ```, hide everything after it
@@ -1412,15 +875,20 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                     contentContainer.innerHTML = writingBadge;
                 }
             } else {
-                contentContainer.innerHTML = formatContent(accumulatedContent + '▋');
+                contentContainer.innerHTML = formatContent(currentContentStr + '▋');
             }
         }
 
         // Periodically render math with KaTeX (throttled, skip if incomplete delimiters)
-        if ((hasContentUpdate || hasReasoningUpdate) && typeof renderMathInElement === 'function') {
+        if (hasVisualUpdate && typeof renderMathInElement === 'function') {
             const now = Date.now();
             if (!processRenderQueue._lastMathRender || now - processRenderQueue._lastMathRender > 1500) {
                 // Check if math delimiters are all closed before rendering
+                // Using the accumulated content for safety check, but rendering displayed part
+                // Actually we should check the displayed part for closure.
+                const currentContentStr = accumulatedContent.substring(0, displayedContentLength);
+                const currentReasoningStr = accumulatedReasoning.substring(0, displayedReasoningLength);
+
                 const hasUnclosedMath = (text) => {
                     if (!text) return false;
                     // Check for unclosed code blocks (```)
@@ -1439,8 +907,8 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                     return false;
                 };
 
-                const contentReady = hasContentUpdate && !hasUnclosedMath(accumulatedContent);
-                const reasoningReady = hasReasoningUpdate && !hasUnclosedMath(accumulatedReasoning);
+                const contentReady = !hasUnclosedMath(currentContentStr);
+                const reasoningReady = !hasUnclosedMath(currentReasoningStr);
 
                 if (contentReady || reasoningReady) {
                     processRenderQueue._lastMathRender = now;
@@ -1776,4 +1244,3 @@ window.openImageLightbox = function (src) {
     const onKey = (e) => { if (e.key === 'Escape') { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 200); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
 }
-
