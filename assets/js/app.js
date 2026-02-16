@@ -1112,6 +1112,8 @@ ${canvas.code}
             return false;
         }
 
+        let sseBuffer = '';
+
         while (true) {
             const { done, value } = await reader.read();
             if (done || shouldStopTyping) {
@@ -1119,8 +1121,10 @@ ${canvas.code}
                 break;
             }
 
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
+            const chunk = decoder.decode(value, { stream: true });
+            sseBuffer += chunk;
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
 
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -1336,14 +1340,29 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
     if (isRendering) return;
     isRendering = true;
 
-    const process = () => {
+    const TARGET_FRAME_MS = 1000 / 30; // Keep rendering smooth but cap expensive reformatting
+    const LIVE_ENHANCE_INTERVAL_MS = 450; // Fast progressive math/code enhancement while streaming
+    let lastUiPaintAt = 0;
+
+    const process = (ts) => {
         if (renderQueue.length === 0 || shouldStopTyping) {
             isRendering = false;
             return;
         }
 
+        const chatArea = document.getElementById('chatArea');
+        const keepViewportAnchor = chatArea && !isAutoScrollEnabled;
+        const beforeScrollHeight = keepViewportAnchor ? chatArea.scrollHeight : 0;
+        const beforeScrollTop = keepViewportAnchor ? chatArea.scrollTop : 0;
+
+        if (lastUiPaintAt && ts - lastUiPaintAt < TARGET_FRAME_MS) {
+            requestAnimationFrame(process);
+            return;
+        }
+        lastUiPaintAt = ts;
+
         const queueSize = renderQueue.length;
-        const processCount = queueSize > 50 ? 20 : (queueSize > 20 ? 10 : (queueSize > 5 ? 2 : 1));
+        const processCount = queueSize > 80 ? 28 : (queueSize > 40 ? 14 : (queueSize > 15 ? 6 : 2));
 
         let hasContentUpdate = false;
         let hasReasoningUpdate = false;
@@ -1443,7 +1462,7 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
         // Periodically render math with KaTeX (throttled, skip if incomplete delimiters)
         if ((hasContentUpdate || hasReasoningUpdate) && typeof renderMathInElement === 'function') {
             const now = Date.now();
-            if (!processRenderQueue._lastMathRender || now - processRenderQueue._lastMathRender > 1500) {
+            if (!processRenderQueue._lastMathRender || now - processRenderQueue._lastMathRender > LIVE_ENHANCE_INTERVAL_MS) {
                 // Check if math delimiters are all closed before rendering
                 const hasUnclosedMath = (text) => {
                     if (!text) return false;
@@ -1475,6 +1494,25 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                     } catch (e) { }
                 }
             }
+        }
+
+        if (hasContentUpdate && typeof hljs !== 'undefined') {
+            const now = Date.now();
+            if (!processRenderQueue._lastCodeHighlight || now - processRenderQueue._lastCodeHighlight > LIVE_ENHANCE_INTERVAL_MS) {
+                processRenderQueue._lastCodeHighlight = now;
+                contentContainer.querySelectorAll('pre code').forEach((block) => {
+                    try { hljs.highlightElement(block); } catch (e) { }
+                });
+            }
+
+            contentContainer.classList.remove('streaming-reveal');
+            void contentContainer.offsetWidth;
+            contentContainer.classList.add('streaming-reveal');
+        }
+
+        if (keepViewportAnchor && chatArea) {
+            const heightDelta = chatArea.scrollHeight - beforeScrollHeight;
+            if (heightDelta !== 0) chatArea.scrollTop = beforeScrollTop + heightDelta;
         }
 
         if (isAutoScrollEnabled) {
@@ -1800,4 +1838,3 @@ window.openImageLightbox = function (src) {
     const onKey = (e) => { if (e.key === 'Escape') { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 200); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
 }
-
