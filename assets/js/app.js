@@ -1289,37 +1289,6 @@ ${canvas.code}
                 messageGroup.innerHTML = `<div class="assistant-message-content"> <div class="assistant-message-text"><p style="color: var(--accent-error);">Sorry, an error occurred.</p></div></div> `;
             }
         }
-    } finally {
-        isProcessing = false;
-        shouldStopTyping = false;
-        updateSendButtonState();
-        abortController = null;
-    }
-}
-
-// Adaptive Render Engine
-let accumulatedContent = '';
-let accumulatedReasoning = '';
-let insideThinkTag = false;
-let _thinkingTimerRef = null; // module-level ref so processRenderQueue can stop it
-let _thinkingStartRef = null;
-let _thinkingEndTimeRef = null;
-
-// Format reasoning/thinking content into readable paragraphs
-function pushCharsToQueue(text, queue) {
-    if (!text) return;
-    for (const char of text) {
-        queue.push(char);
-    }
-}
-
-function formatThinkingContent(text) {
-    if (!text) return '';
-    // First, if the text already has paragraph breaks, use formatContent directly
-    if (text.includes('\n\n')) {
-        return formatContent(text);
-    }
-    // Break at common reasoning transition markers
     // These indicate shifts in the AI's thinking
     const markers = [
         /(?<=\. )(Wait[,.])/g,
