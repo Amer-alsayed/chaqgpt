@@ -1283,6 +1283,7 @@ body {
 }
 
 .chat-area {
+    overflow-anchor: auto;
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
@@ -1339,6 +1340,7 @@ body {
 
 
 .main-content.welcome-mode .chat-area {
+    overflow-anchor: auto;
     flex: none;
     width: 100%;
 }
@@ -2627,6 +2629,7 @@ body {
     }
 
     .chat-area {
+    overflow-anchor: auto;
         padding-bottom: 150px;
     }
 
@@ -2764,6 +2767,7 @@ body {
     }
 
     .chat-area {
+    overflow-anchor: auto;
         overscroll-behavior: contain;
     }
 
