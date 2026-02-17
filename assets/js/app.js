@@ -12,6 +12,11 @@ let abortController = null;
 let shouldStopTyping = false;
 let isAutoScrollEnabled = true; // Default to true
 let renderQueue = [];
+let displayQueue = [];
+let reasoningDisplayQueue = [];
+let accumulatedDisplayContent = "";
+let accumulatedDisplayReasoning = "";
+let isVisualLoopRunning = false;
 let isRendering = false;
 let canvasMode = false; // Canvas mode toggle — AI knows about code context
 let availableModels = [...models]; // Initialize with config models
@@ -826,12 +831,27 @@ function formatContentForCanvas(raw) {
 function formatContent(raw) {
     if (!raw) return '<p></p>';
 
-    // 1. Extract code blocks BEFORE escaping (preserve raw content)
     const blocks = [];
-    let text = raw.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    let text = raw;
+
+    // 1. Extract code blocks BEFORE escaping (preserve raw content)
+    // Handle standard closed blocks
+    text = text.replace(/__BLOCK_OPEN__(\w*)__BLOCK_CLOSE__/g, '\n```$1\n'); // Restore from any previous placeholders
+    text = text.replace(/__BLOCK_CLOSE__/g, '\n```');
+
+    text = text.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
         blocks.push({ lang: (lang || 'plaintext').toLowerCase(), code: code.trim() });
         return `\n[[[BLOCK_${blocks.length - 1}]]]\n`;
     });
+
+    // 1b. Handle UNCLOSED code block at the end (for smooth typing)
+    const unclosedMatch = text.match(/(^|\n)```([a-zA-Z0-9_+-]*)\n([\s\S]*?)$/);
+    if (unclosedMatch) {
+         const lang = (unclosedMatch[2] || 'plaintext').toLowerCase();
+         const code = unclosedMatch[3];
+         blocks.push({ lang, code: code });
+         text = text.substring(0, unclosedMatch.index) + `\n[[[BLOCK_${blocks.length - 1}]]]\n`;
+    }
 
     // 2. Extract math expressions BEFORE escaping to preserve LaTeX
     const mathBlocks = [];
@@ -939,13 +959,11 @@ function formatContent(raw) {
                                     </div>
                                 </div>
                                 <pre><code class="${langClass}">${escapeHtml(b.code)}</code></pre>
-                             </div>`;
-        html = html.replace(`[[[BLOCK_${idx}]]]`, replacement);
+                             </div>\`;
+        html = html.replace(\`[[[BLOCK_\${idx}]]]\`, replacement);
     });
     return html || '<p></p>';
 }
-
-
 window.sendMessage = async function () {
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
@@ -1288,6 +1306,49 @@ let _thinkingStartRef = null;
 let _thinkingEndTimeRef = null;
 
 // Format reasoning/thinking content into readable paragraphs
+function pushCharsToQueue(text, queue) {
+    if (!text) return;
+    for (const char of text) {
+        queue.push(char);
+    }
+}
+
+function formatThinkingContent(text) {
+    if (!text) return '';
+    // First, if the text already has paragraph breaks, use formatContent directly
+    if (text.includes('\n\n')) {
+        return formatContent(text);
+    }
+    // Break at common reasoning transition markers
+    // These indicate shifts in the AI's thinking
+    const markers = [
+        /(?<=\. )(Wait[,.])/g,
+        /(?<=\. )(But wait[,.])/g,
+        /(?<=\. )(Actually[,.])/g,
+        /(?<=\. )(Hmm[,.])/g,
+        /(?<=\. )(Let me )/g,
+        /(?<=\. )(Let's )/g,
+        /(?<=\. )(Now[,] )/g,
+        /(?<=\. )(So[,] )/g,
+        /(?<=\. )(OK[,. ])/gi,
+        /(?<=\. )(First[,] )/g,
+        /(?<=\. )(Next[,] )/g,
+        /(?<=\. )(Then[,] )/g,
+        /(?<=\. )(Therefore[,] )/g,
+        /(?<=\. )(However[,] )/g,
+        /(?<=\. )(Also[,] )/g,
+        /(?<=\. )(Since )/g,
+        /(?<=\. )(Because )/g,
+        /(?<=\. )(This means )/g,
+        /(?<=\. )(That means )/g,
+        /(?<=\. )(In other words[,] )/g,
+        /(?<=\. )(Alternatively[,] )/g,
+        /(?<=\. )(The answer )/g,
+        /(?<=\. )(Wait, maybe )/g,
+        /(?<=\. )(Yes[,.!] )/g,
+// Helper for real-time highlighting
+
+// Format reasoning/thinking content into readable paragraphs
 function formatThinkingContent(text) {
     if (!text) return '';
     // First, if the text already has paragraph breaks, use formatContent directly
@@ -1331,10 +1392,110 @@ function formatThinkingContent(text) {
 
     return formatContent(formatted);
 }
+function highlightCodeBlocks(container) {
+    if(!container) return;
+    container.querySelectorAll('pre code').forEach((block) => {
+        if (!block.classList.contains('hljs')) {
+            hljs.highlightElement(block);
+        }
+    });
+}
+
+function startVisualLoop(contentContainer, thinkingContainer, thinkingSection) {
+    if (isVisualLoopRunning) return;
+    isVisualLoopRunning = true;
+
+    const chatArea = document.getElementById('chatArea');
+
+    function loop() {
+        if (!isProcessing && displayQueue.length === 0 && reasoningDisplayQueue.length === 0) {
+            isVisualLoopRunning = false;
+            return;
+        }
+
+        let hasUpdates = false;
+
+        // 1. Process Reasoning Queue
+        if (reasoningDisplayQueue.length > 0) {
+            const count = Math.max(1, Math.ceil(reasoningDisplayQueue.length / 10));
+            let chunk = '';
+            for(let i=0; i<count && reasoningDisplayQueue.length > 0; i++) chunk += reasoningDisplayQueue.shift();
+            accumulatedDisplayReasoning += chunk;
+
+            if (thinkingContainer) {
+                const innerDiv = thinkingContainer.querySelector('div');
+                if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedDisplayReasoning);
+            }
+            if (thinkingSection && thinkingSection.style.display === 'none') {
+                thinkingSection.style.display = '';
+            }
+            hasUpdates = true;
+        }
+
+        // 2. Process Content Queue
+        if (displayQueue.length > 0) {
+            // Adaptive speed: faster if queue fills up
+            const count = Math.max(2, Math.ceil(displayQueue.length / 5));
+            let chunk = '';
+            for(let i=0; i<count && displayQueue.length > 0; i++) chunk += displayQueue.shift();
+            accumulatedDisplayContent += chunk;
+
+            if (contentContainer) {
+                 if (canvasMode) {
+                    let liveText = accumulatedDisplayContent;
+                    liveText = liveText.replace(/__BLOCK_OPEN__(\w*)__BLOCK_CLOSE__/g, '\n```\n'); // Handle temporary placeholders from formatContent
+                    liveText = liveText.replace(/__BLOCK_CLOSE__/g, '\n```');
+
+                    liveText = liveText.replace(/(```[a-zA-Z0-9_+-]*\n[\s\S]*?```)/g, ''); // Hide completed blocks
+                    const unclosedIdx = liveText.indexOf('```');
+                    let isWritingCode = false;
+                    if (unclosedIdx !== -1) {
+                        liveText = liveText.substring(0, unclosedIdx);
+                        isWritingCode = true;
+                    }
+                    liveText = liveText.replace(/\n{3,}/g, '\n\n').trim();
+                    const writingBadge = '<div class="canvas-applied-badge" style="opacity:0.7"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Writing to canvas…</div>';
+                    if (liveText) {
+                        contentContainer.innerHTML = formatContent(liveText + ' ▋') + (isWritingCode ? writingBadge : '');
+                    } else {
+                        contentContainer.innerHTML = writingBadge;
+                    }
+                } else {
+                    contentContainer.innerHTML = formatContent(accumulatedDisplayContent + '▋');
+                }
+            }
+            hasUpdates = true;
+        }
+
+        // 3. Post-Render Updates
+        if (hasUpdates) {
+            highlightCodeBlocks(contentContainer);
+
+            const now = Date.now();
+            if (!startVisualLoop._lastMath || now - startVisualLoop._lastMath > 100) {
+                 startVisualLoop._lastMath = now;
+                 try {
+                    const katexOpts = { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false };
+                    if (contentContainer && typeof renderMathInElement === 'function') renderMathInElement(contentContainer, katexOpts);
+                    if (thinkingContainer && typeof renderMathInElement === 'function') renderMathInElement(thinkingContainer, katexOpts);
+                 } catch(e) {}
+            }
+
+            if (isAutoScrollEnabled && chatArea) {
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+        }
+
+        requestAnimationFrame(loop);
+    }
+    loop();
+}
 
 async function processRenderQueue(contentContainer, thinkingContainer, thinkingSection, onThinkingRevealed) {
     if (isRendering) return;
     isRendering = true;
+
+    startVisualLoop(contentContainer, thinkingContainer, thinkingSection);
 
     const process = () => {
         if (renderQueue.length === 0 || shouldStopTyping) {
@@ -1342,23 +1503,15 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
             return;
         }
 
-        const queueSize = renderQueue.length;
-        const processCount = queueSize > 50 ? 20 : (queueSize > 20 ? 10 : (queueSize > 5 ? 2 : 1));
-
-        let hasContentUpdate = false;
-        let hasReasoningUpdate = false;
-
-        for (let i = 0; i < processCount && renderQueue.length > 0; i++) {
+        while (renderQueue.length > 0) {
             const delta = renderQueue.shift();
 
-            // Handle dedicated reasoning fields
             const reasoning = delta?.reasoning_content || delta?.reasoning;
             if (reasoning) {
                 accumulatedReasoning += reasoning;
-                hasReasoningUpdate = true;
+                pushCharsToQueue(reasoning, reasoningDisplayQueue);
             }
 
-            // Handle content â€” parse <think> tags in real-time
             const content = delta?.content;
             if (content) {
                 let remaining = content;
@@ -1366,27 +1519,29 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                     if (insideThinkTag) {
                         const closeIdx = remaining.indexOf('</think>');
                         if (closeIdx !== -1) {
-                            accumulatedReasoning += remaining.substring(0, closeIdx);
-                            hasReasoningUpdate = true;
+                            const part = remaining.substring(0, closeIdx);
+                            accumulatedReasoning += part;
+                            pushCharsToQueue(part, reasoningDisplayQueue);
                             insideThinkTag = false;
                             remaining = remaining.substring(closeIdx + 8);
                         } else {
                             accumulatedReasoning += remaining;
-                            hasReasoningUpdate = true;
+                            pushCharsToQueue(remaining, reasoningDisplayQueue);
                             remaining = '';
                         }
                     } else {
                         const openIdx = remaining.indexOf('<think>');
                         if (openIdx !== -1) {
                             if (openIdx > 0) {
-                                accumulatedContent += remaining.substring(0, openIdx);
-                                hasContentUpdate = true;
+                                const part = remaining.substring(0, openIdx);
+                                accumulatedContent += part;
+                                pushCharsToQueue(part, displayQueue);
                             }
                             insideThinkTag = true;
                             remaining = remaining.substring(openIdx + 7);
                         } else {
                             accumulatedContent += remaining;
-                            hasContentUpdate = true;
+                            pushCharsToQueue(remaining, displayQueue);
                             remaining = '';
                         }
                     }
@@ -1394,20 +1549,8 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
             }
         }
 
-        // Reveal thinking section as soon as reasoning arrives
-        if (hasReasoningUpdate && thinkingSection && thinkingSection.style.display === 'none') {
-            thinkingSection.style.display = '';
-            if (onThinkingRevealed) onThinkingRevealed();
-        }
-
-        if (hasReasoningUpdate && thinkingContainer) {
-            const innerDiv = thinkingContainer.querySelector('div');
-            if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedReasoning);
-        }
-
-        if (hasContentUpdate) {
-            // Stop thinking timer when actual content starts arriving (reasoning ended)
-            if (_thinkingTimerRef && thinkingSection) {
+        if (!insideThinkTag && accumulatedContent.length > 0) {
+             if (_thinkingTimerRef && thinkingSection) {
                 clearInterval(_thinkingTimerRef);
                 const elapsed = _thinkingStartRef ? Math.round((Date.now() - _thinkingStartRef) / 1000) : 0;
                 const labelEl = thinkingSection.querySelector('.thinking-label');
@@ -1415,70 +1558,6 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                 _thinkingTimerRef = null;
                 _thinkingEndTimeRef = Date.now();
             }
-            if (canvasMode) {
-                // In canvas mode, hide code blocks from live display
-                let liveText = accumulatedContent;
-                // Remove completed code blocks
-                liveText = liveText.replace(/```[a-zA-Z0-9_+-]*\n[\s\S]*?```/g, '');
-                // If there's an unclosed ```, hide everything after it
-                const unclosedIdx = liveText.indexOf('```');
-                let isWritingCode = false;
-                if (unclosedIdx !== -1) {
-                    liveText = liveText.substring(0, unclosedIdx);
-                    isWritingCode = true;
-                }
-                liveText = liveText.replace(/\n{3,}/g, '\n\n').trim();
-                // Badge HTML — appended AFTER formatContent to avoid escaping
-                const writingBadge = '<div class="canvas-applied-badge" style="opacity:0.7"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Writing to canvas…</div>';
-                if (liveText) {
-                    contentContainer.innerHTML = formatContent(liveText + ' ▋') + (isWritingCode ? writingBadge : '');
-                } else {
-                    contentContainer.innerHTML = writingBadge;
-                }
-            } else {
-                contentContainer.innerHTML = formatContent(accumulatedContent + '▋');
-            }
-        }
-
-        // Periodically render math with KaTeX (throttled, skip if incomplete delimiters)
-        if ((hasContentUpdate || hasReasoningUpdate) && typeof renderMathInElement === 'function') {
-            const now = Date.now();
-            if (!processRenderQueue._lastMathRender || now - processRenderQueue._lastMathRender > 1500) {
-                // Check if math delimiters are all closed before rendering
-                const hasUnclosedMath = (text) => {
-                    if (!text) return false;
-                    // Check for unclosed code blocks (```)
-                    const codeBlocks = (text.match(/```/g) || []).length;
-                    if (codeBlocks % 2 !== 0) return true;
-                    // Check for unclosed $$ (display math)
-                    const doubleDollar = (text.match(/\$\$/g) || []).length;
-                    if (doubleDollar % 2 !== 0) return true;
-                    // Check for unclosed \[ or \(
-                    const openBracket = (text.match(/\\\[/g) || []).length;
-                    const closeBracket = (text.match(/\\\]/g) || []).length;
-                    if (openBracket > closeBracket) return true;
-                    const openParen = (text.match(/\\\(/g) || []).length;
-                    const closeParen = (text.match(/\\\)/g) || []).length;
-                    if (openParen > closeParen) return true;
-                    return false;
-                };
-
-                const contentReady = hasContentUpdate && !hasUnclosedMath(accumulatedContent);
-                const reasoningReady = hasReasoningUpdate && !hasUnclosedMath(accumulatedReasoning);
-
-                if (contentReady || reasoningReady) {
-                    processRenderQueue._lastMathRender = now;
-                    try {
-                        const katexOpts = { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false };
-                        if (contentReady) renderMathInElement(contentContainer, katexOpts);
-                        if (reasoningReady && thinkingContainer) renderMathInElement(thinkingContainer, katexOpts);
-                    } catch (e) { }
-                }
-            }
-        }
-
-        if (isAutoScrollEnabled) {
-            scrollToBottom(true);
         }
 
         requestAnimationFrame(process);
@@ -1486,318 +1565,3 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
 
     requestAnimationFrame(process);
 }
-
-
-window.deleteChat = function (chatId, event) {
-    if (event) event.stopPropagation();
-    window.closeChatMenu();
-    delete chatHistoryData[chatId];
-    localStorage.setItem('chatHistory', JSON.stringify(chatHistoryData));
-    if (currentChatId === chatId) window.newChat();
-    renderChatHistory();
-}
-
-window.openChatMenu = function (chatId, event) {
-    event.stopPropagation();
-    // Close any open menu first
-    window.closeChatMenu();
-    const navItem = event.target.closest('.nav-item');
-    navItem.classList.add('menu-open');
-    const menu = navItem.querySelector('.chat-context-menu');
-    if (menu) menu.classList.add('show');
-}
-
-window.closeChatMenu = function () {
-    document.querySelectorAll('.nav-item.menu-open').forEach(el => el.classList.remove('menu-open'));
-    document.querySelectorAll('.chat-context-menu.show').forEach(el => el.classList.remove('show'));
-}
-
-window.renameChat = function (chatId, event) {
-    if (event) event.stopPropagation();
-    window.closeChatMenu();
-    const navItem = document.querySelector(`.nav-item[data-chat-id="${chatId}"]`);
-    if (!navItem) return;
-    const textEl = navItem.querySelector('.nav-item-text');
-    const oldTitle = chatHistoryData[chatId].title;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'chat-rename-input';
-    input.value = oldTitle;
-    textEl.replaceWith(input);
-    input.focus();
-    input.select();
-
-    const save = () => {
-        const newTitle = input.value.trim() || oldTitle;
-        chatHistoryData[chatId].title = newTitle;
-        localStorage.setItem('chatHistory', JSON.stringify(chatHistoryData));
-        renderChatHistory();
-    };
-
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { input.value = oldTitle; input.blur(); }
-    });
-}
-
-window.pinChat = function (chatId, event) {
-    if (event) event.stopPropagation();
-    window.closeChatMenu();
-    chatHistoryData[chatId].pinned = !chatHistoryData[chatId].pinned;
-    localStorage.setItem('chatHistory', JSON.stringify(chatHistoryData));
-    renderChatHistory();
-}
-
-// ... Additional helpers will be added below ...
-function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
-function buildDocsHtmlFromAssistantText(messageTextEl) {
-    const clone = messageTextEl.cloneNode(true);
-
-    clone.querySelectorAll('.code-header-right, .copy-code-btn, .code-run-btn, .code-run-output').forEach(el => el.remove());
-
-    // Prefer plain math text over KaTeX DOM for cleaner Docs pastes.
-    clone.querySelectorAll('.katex').forEach(el => {
-        const annotation = el.querySelector('annotation');
-        const text = annotation ? annotation.textContent : (el.textContent || '');
-        el.replaceWith(document.createTextNode(text));
-    });
-
-    const inlineStyles = {
-        p: 'margin: 0 0 12px 0;',
-        h1: 'font-size: 24px; line-height: 1.3; margin: 24px 0 12px 0; font-weight: 700;',
-        h2: 'font-size: 20px; line-height: 1.35; margin: 20px 0 10px 0; font-weight: 700;',
-        h3: 'font-size: 17px; line-height: 1.4; margin: 16px 0 8px 0; font-weight: 700;',
-        ul: 'margin: 0 0 12px 24px; padding: 0;',
-        ol: 'margin: 0 0 12px 24px; padding: 0;',
-        li: 'margin: 0 0 6px 0;',
-        pre: 'background: #f6f8fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin: 12px 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap;',
-        code: 'background: #f3f4f6; border-radius: 4px; padding: 2px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;',
-        blockquote: 'margin: 12px 0; padding: 8px 12px; border-left: 3px solid #d1d5db; color: #374151; background: #f9fafb;',
-        table: 'border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px;',
-        th: 'border: 1px solid #d1d5db; padding: 8px; background: #f3f4f6; text-align: left; font-weight: 600;',
-        td: 'border: 1px solid #d1d5db; padding: 8px; vertical-align: top;',
-        a: 'color: #2563eb; text-decoration: underline;'
-    };
-
-    Object.entries(inlineStyles).forEach(([selector, style]) => {
-        clone.querySelectorAll(selector).forEach(el => {
-            if (selector === 'code' && el.closest('pre')) return;
-            el.style.cssText = `${el.style.cssText}; ${style}`;
-        });
-    });
-
-    clone.querySelectorAll('*').forEach(el => {
-        el.removeAttribute('class');
-        if (el.tagName !== 'A') el.removeAttribute('target');
-        if (el.tagName !== 'A') el.removeAttribute('rel');
-    });
-
-    return `<!doctype html><html><body><div style="font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #111827; font-size: 14px; line-height: 1.7;">${clone.innerHTML}</div></body></html>`;
-}
-
-async function copyRichHtmlToClipboard(html, plainText) {
-    if (navigator.clipboard && window.ClipboardItem) {
-        const item = new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([plainText], { type: 'text/plain' })
-        });
-        await navigator.clipboard.write([item]);
-        return true;
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(plainText);
-        return false;
-    }
-    return false;
-}
-window.copyAssistantMessage = function (button) { const messageText = button.closest('.assistant-message-content').querySelector('.assistant-message-text'); navigator.clipboard.writeText(messageText ? messageText.innerText : '').then(() => { const originalContent = button.innerHTML; button.innerHTML = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `; setTimeout(() => { button.innerHTML = originalContent; }, 2000); }).catch(err => console.error('Failed to copy text: ', err)); }
-window.copyAssistantForDocs = async function (button) {
-    const messageText = button.closest('.assistant-message-content').querySelector('.assistant-message-text');
-    if (!messageText) return;
-
-    const html = buildDocsHtmlFromAssistantText(messageText);
-    const plainText = messageText.innerText || '';
-    try {
-        const copiedRich = await copyRichHtmlToClipboard(html, plainText);
-        const originalContent = button.innerHTML;
-        button.innerHTML = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `;
-        setTimeout(() => { button.innerHTML = originalContent; }, 2000);
-        showToast(copiedRich ? 'Copied in Google Docs format. Paste in Docs with Ctrl+V.' : 'Copied plain text (rich copy not supported in this browser).', 'success');
-    } catch (err) {
-        console.error('Failed to copy docs format:', err);
-        showToast('Unable to copy for Docs. Please try again.', 'error');
-    }
-}
-window.copyUserMessage = function (button) { const messageText = button.closest('.user-message-content').querySelector('.user-message-text'); navigator.clipboard.writeText(messageText ? messageText.innerText : '').then(() => { const originalContent = button.innerHTML; button.innerHTML = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `; setTimeout(() => { button.innerHTML = originalContent; }, 2000); }).catch(err => console.error('Failed to copy text: ', err)); }
-window.showToast = function (message, type = 'success') { const toast = document.createElement('div'); toast.className = `toast ${type} `; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => toast.remove(), 3000); }
-
-// Smooth scroll with requestAnimationFrame for better performance
-window.scrollToBottom = function (smooth = true) {
-    const chatArea = document.getElementById('chatArea');
-
-    // If not smooth (forced), jump immediately
-    if (!smooth) {
-        chatArea.scrollTop = chatArea.scrollHeight;
-        return;
-    }
-
-    // For smooth auto-scroll, we use native behavior but only if deviation is significant
-    const target = chatArea.scrollHeight;
-    const current = chatArea.scrollTop + chatArea.clientHeight;
-
-    if (Math.abs(target - current) > 10) {
-        chatArea.scrollTo({ top: target, behavior: 'smooth' });
-    }
-
-    // Re-enable auto-scroll when explicitly called
-    isAutoScrollEnabled = true;
-}
-
-function setupScrollDetection() {
-    const chatArea = document.getElementById('chatArea');
-    const scrollBtn = document.getElementById('scrollToBottom');
-    let lastScrollTop = chatArea.scrollTop;
-
-    // Backup: Early detection of interaction
-    chatArea.addEventListener('wheel', (e) => {
-        // If scrolling UP, kill auto-scroll immediately
-        if (e.deltaY < 0) isAutoScrollEnabled = false;
-    }, { passive: true });
-
-    chatArea.addEventListener('touchstart', (e) => {
-        isAutoScrollEnabled = false; // Assume interaction stops auto-scroll initially
-    }, { passive: true });
-
-    chatArea.addEventListener('scroll', () => {
-        const currentScrollTop = chatArea.scrollTop;
-        const threshold = 4;
-        const distanceToBottom = chatArea.scrollHeight - currentScrollTop - chatArea.clientHeight;
-        const isAtBottom = distanceToBottom <= threshold;
-
-        // "Sensitivity" check: If we moved UP, user is fighting auto-scroll.
-        // Use a tiny epsilon (0.5) to handle sub-pixel rendering differences.
-        if (currentScrollTop < lastScrollTop - 0.5) {
-            isAutoScrollEnabled = false;
-        }
-
-        // If we actively hit the bottom (scrolled down), re-engage
-        if (isAtBottom) {
-            isAutoScrollEnabled = true;
-        }
-
-        lastScrollTop = currentScrollTop;
-
-        if (scrollBtn) {
-            scrollBtn.classList.toggle('show', !isAutoScrollEnabled && messagesContainer);
-        }
-    }, { passive: true });
-}
-
-function saveCurrentChat() { if (!window.isTempChat && currentChatId && chatHistoryData[currentChatId] && conversationHistory.length > 0) { chatHistoryData[currentChatId].messages = conversationHistory; localStorage.setItem('chatHistory', JSON.stringify(chatHistoryData)); } }
-function loadChatHistory() { const stored = localStorage.getItem('chatHistory'); if (stored) chatHistoryData = JSON.parse(stored); renderChatHistory(); }
-
-function renderChatHistory() {
-    const historyContainer = document.getElementById('chatHistory');
-    // Remove all dynamic items
-    historyContainer.querySelectorAll('.nav-item, .sidebar-section-label').forEach(el => el.remove());
-
-    const entries = Object.entries(chatHistoryData).sort(([, a], [, b]) => (b.createdAt || 0) - (a.createdAt || 0));
-    const pinned = entries.filter(([, chat]) => chat.pinned);
-    const unpinned = entries.filter(([, chat]) => !chat.pinned);
-
-    const menuIcon = `<svg width = "16" height = "16" viewBox = "0 0 24 24" fill = "currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg> `;
-    const renameIcon = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `;
-    const pinIcon = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M12 17v5M9 3h6l1 7h1a2 2 0 010 4H7a2 2 0 010-4h1l1-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `;
-    const deleteIcon = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" stroke-width="2" stroke-linecap="round" /></svg> `;
-
-    function buildItem(chatId, chat) {
-        const isPinned = chat.pinned;
-        const item = document.createElement('div');
-        item.className = 'nav-item' + (chatId === currentChatId ? ' active' : '');
-        item.setAttribute('data-chat-id', chatId);
-        item.innerHTML = `<span class="nav-item-text"> ${escapeHtml(chat.title)}</span>
-            <button class="chat-menu-btn" onclick="openChatMenu('${chatId}', event)">${menuIcon}</button>
-            <div class="chat-context-menu">
-                <div class="chat-menu-item" onclick="renameChat('${chatId}', event)">${renameIcon} Rename</div>
-                <div class="chat-menu-item" onclick="pinChat('${chatId}', event)">${pinIcon} ${isPinned ? 'Unpin chat' : 'Pin chat'}</div>
-                <div class="chat-menu-item delete-item" onclick="deleteChat('${chatId}', event)">${deleteIcon} Delete</div>
-            </div>`;
-        item.onclick = (e) => { if (!e.target.closest('.chat-menu-btn') && !e.target.closest('.chat-context-menu')) loadChat(chatId, item); };
-        return item;
-    }
-
-    if (pinned.length > 0) {
-        const label = document.createElement('div');
-        label.className = 'sidebar-section-label';
-        label.textContent = 'Pinned';
-        historyContainer.appendChild(label);
-        pinned.forEach(([chatId, chat]) => historyContainer.appendChild(buildItem(chatId, chat)));
-    }
-
-    if (unpinned.length > 0) {
-        if (pinned.length > 0) {
-            const label = document.createElement('div');
-            label.className = 'sidebar-section-label';
-            label.textContent = 'Recent';
-            historyContainer.appendChild(label);
-        }
-        unpinned.forEach(([chatId, chat]) => historyContainer.appendChild(buildItem(chatId, chat)));
-    }
-}
-
-// Close context menu on outside click
-document.addEventListener('click', () => { window.closeChatMenu(); });
-
-function loadChat(chatId, itemEl) {
-    window.stopGeneration();
-    shouldStopTyping = false;
-    saveCurrentChat();
-    if (typeof window.closeCanvas === 'function') window.closeCanvas();
-    const chat = chatHistoryData[chatId];
-    currentChatId = chatId;
-    conversationHistory = chat.messages || [];
-    const chatArea = document.getElementById('chatArea');
-    chatArea.innerHTML = '';
-    document.getElementById('mainContent').classList.remove('welcome-mode');
-    messagesContainer = document.createElement('div');
-    messagesContainer.className = 'messages-container';
-    chatArea.appendChild(messagesContainer);
-    conversationHistory.forEach(msg => {
-        if (msg.role === 'user') addUserMessage(msg.content);
-        else if (msg.role === 'assistant') addAssistantMessage(msg.content, false);
-    });
-    document.querySelectorAll('#chatHistory .nav-item').forEach(item => item.classList.remove('active'));
-    if (itemEl) itemEl.classList.add('active');
-    window.scrollToBottom(false);
-    if (window.innerWidth <= 768) window.closeSidebar();
-}
-
-// Event Listeners for miscellaneous things
-window.addEventListener('load', () => {
-    const input = document.getElementById('messageInput');
-    if (input) input.focus();
-});
-document.getElementById('modalOverlay').addEventListener('click', (e) => { if (e.target.id === 'modalOverlay') window.closeUsernameModal(); });
-document.getElementById('usernameInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.saveUsername(); });
-window.addEventListener('orientationchange', () => { setTimeout(() => { window.scrollToBottom(false); }, 300); });
-
-
-// Image lightbox
-window.openImageLightbox = function (src) {
-    const overlay = document.createElement('div');
-    overlay.className = 'image-lightbox-overlay';
-    overlay.innerHTML = `<img src="${src}" class="image-lightbox-img"><button class="image-lightbox-close">&times;</button>`;
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay || e.target.classList.contains('image-lightbox-close')) {
-            overlay.classList.remove('show');
-            setTimeout(() => overlay.remove(), 200);
-        }
-    });
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add('show'));
-
-    const onKey = (e) => { if (e.key === 'Escape') { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 200); document.removeEventListener('keydown', onKey); } };
-    document.addEventListener('keydown', onKey);
-}
-
