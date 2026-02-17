@@ -1,6 +1,7 @@
 import { models, welcomeHeadings, suggestionSets } from './config.js';
 
 const API_URL = '/api/chat';
+const API_IMAGE_URL = '/api/image';
 
 let conversationHistory = [];
 let isProcessing = false;
@@ -16,45 +17,134 @@ let isRendering = false;
 let canvasMode = false; // Canvas mode toggle — AI knows about code context
 let availableModels = [...models]; // Initialize with config models
 let pendingImages = []; // base64 data URLs for image attachments
+let pendingFiles = []; // PDF attachments as data URLs
+let imageGenerationMode = false;
+let modelsMeta = null;
+const SEND_BUTTON_SEND_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+const SEND_BUTTON_STOP_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>`;
+const CANVAS_PREVIEW_LANGS = ['html', 'css', 'javascript', 'js', 'latex', 'tex'];
+const CANVAS_RUN_LANGS_SAFE = [
+    'javascript', 'js', 'python', 'py', 'python3',
+    'c', 'cpp', 'c++', 'java', 'go', 'golang', 'rust',
+    'ruby', 'swift', 'typescript', 'ts',
+    'haskell', 'scala', 'zig', 'pascal', 'fortran', 'ocaml', 'erlang'
+];
+
+function buildCanvasSystemPrompt(canvasState) {
+    const previewList = CANVAS_PREVIEW_LANGS.join(', ');
+    const runList = CANVAS_RUN_LANGS_SAFE.join(', ');
+
+    const supportPolicy = `CANVAS CAPABILITIES POLICY:
+1. By default, only generate code in languages that are known-supported by this canvas.
+2. Preview-capable languages (Preview tab): ${previewList}
+3. Run-capable safe languages (Run/Console): ${runList}
+4. If the user does NOT force a specific language, choose from the supported lists above.
+5. If the user explicitly forces a different language, follow the user request, but clearly warn that it may not run/preview in canvas.
+6. Never default to native GUI frameworks (for example pygame, tkinter, PyQt) for canvas output.
+7. Prefer HTML/CSS/JS for visual interactive previews.`;
+
+    if (canvasState && canvasState.isOpen && canvasState.code) {
+        return `You are in CANVAS MODE editing ${canvasState.langLabel} code.
+${supportPolicy}
+
+CRITICAL EDITING RULES:
+1. When the user asks for a change, output the COMPLETE updated file in a single \`\`\`${canvasState.lang} code block. Include ALL original code with requested modifications applied.
+2. Modify ONLY what the user asked for; keep everything else as-is.
+3. Keep explanation brief and outside the code block.`;
+    }
+
+    return `You are in CANVAS MODE.
+${supportPolicy}
+
+Output clean, complete, runnable code in a single fenced code block with a correct language tag. Keep explanation brief.`;
+}
 
 // Load dynamic models from API
 async function fetchModels() {
     try {
         const response = await fetch('/api/models');
         if (response.ok) {
-            const dynamicModels = await response.json();
+            const payload = await response.json();
+            const dynamicModels = Array.isArray(payload) ? payload : payload.models;
+            modelsMeta = Array.isArray(payload) ? null : payload.meta || null;
+            updateModelFreshnessIndicator();
+
             if (dynamicModels && dynamicModels.length > 0) {
-                availableModels = dynamicModels;
+                availableModels = dynamicModels.map((model) => ({
+                    ...model,
+                    capabilities: {
+                        reasoning: Boolean(model?.capabilities?.reasoning ?? model?.supportsThinking),
+                        visionInput: Boolean(model?.capabilities?.visionInput ?? model?.supportsVision),
+                        imageOutput: Boolean(model?.capabilities?.imageOutput),
+                        fileInputPdf: Boolean(model?.capabilities?.fileInputPdf),
+                        textChat: Boolean(model?.capabilities?.textChat ?? true),
+                    },
+                }));
                 initializeModels();
 
                 // Restore saved model preference
                 const saved = localStorage.getItem('selectedModel');
                 const savedModelExists = saved && availableModels.find(m => m.id === saved);
-                const currentModelExists = availableModels.find(m => m.id === currentModel);
 
                 if (savedModelExists) {
                     currentModel = saved;
-                    updateHeaderModelDisplay();
-                } else if (!currentModelExists) {
-                    // Prefer Qwen3 VL 30B A3B as default for new users
-                    const preferredDefault = availableModels.find(m => m.id.includes('qwen3-vl-30b-a3b'));
-                    currentModel = preferredDefault ? preferredDefault.id : availableModels[0].id;
-                    saveSelectedModel();
-                    updateHeaderModelDisplay();
-                } else {
-                    updateHeaderModelDisplay();
                 }
+                if (!getCurrentModelData()) autoSwitchToSupportedModel(true);
+                updateHeaderModelDisplay();
             }
         }
-        // Update vision UI after models are loaded
+        // Update composer feature buttons after models are loaded
         updateVisionUI();
     } catch (error) {
         console.error('Failed to fetch dynamic models:', error);
+        modelsMeta = { isStale: true };
+        updateModelFreshnessIndicator();
     }
 }
 
+function updateModelFreshnessIndicator() {
+    const staleEl = document.getElementById('modelStaleIndicator');
+    if (!staleEl) return;
+    staleEl.style.display = modelsMeta?.isStale ? '' : 'none';
+}
+
+function getCurrentModelData() {
+    return availableModels.find(m => m.id === currentModel) || null;
+}
+
+function pickPreferredSupportedModel() {
+    if (!availableModels || availableModels.length === 0) return null;
+    const preferred = availableModels.find((model) => model.id === 'qwen/qwen3-vl-30b-a3b:free');
+    if (preferred) return preferred;
+    const textCapable = availableModels.find((model) => model?.capabilities?.textChat !== false);
+    return textCapable || availableModels[0];
+}
+
+function autoSwitchToSupportedModel(notify = false) {
+    const fallback = pickPreferredSupportedModel();
+    if (!fallback) return false;
+    const changed = currentModel !== fallback.id;
+    currentModel = fallback.id;
+    saveSelectedModel();
+    updateHeaderModelDisplay();
+    updateVisionUI();
+    if (changed && notify) {
+        showToast(`Model unavailable. Switched to ${fallback.name}.`, 'warning');
+    }
+    return true;
+}
+
+async function ensureCurrentModelSupported(fetchIfMissing = false, notify = false) {
+    if (getCurrentModelData()) return true;
+    if (fetchIfMissing) {
+        await fetchModels();
+    }
+    if (getCurrentModelData()) return true;
+    return autoSwitchToSupportedModel(notify);
+}
+
 function updateHeaderModelDisplay() {
-    const savedModelData = availableModels.find(m => m.id === currentModel);
+    const savedModelData = getCurrentModelData();
     if (savedModelData) {
         const badge = document.getElementById('modelBadge');
         const headerName = document.getElementById('headerModelName');
@@ -79,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         initializeModels();
     }
+    updateVisionUI();
 
     // Fetch fresh models in background
     fetchModels();
@@ -90,6 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSidebarOverlay();
     preventBodyScroll();
     setupMobileKeyboard();
+    updateSendButtonState();
 });
 
 function setupMobileKeyboard() {
@@ -248,7 +340,16 @@ function buildModelListHTML(filterQuery = '') {
     Object.keys(categories).forEach(category => {
         html += `<div class="model-section-title">${category}</div>`;
         categories[category].forEach(model => {
-            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${model.name}"><div class="model-info"><div class="model-name">${model.name}</div></div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+            const caps = model.capabilities || {};
+            const tags = [];
+            if (caps.reasoning) tags.push('Reasoning');
+            if (caps.visionInput) tags.push('Vision');
+            if (caps.imageOutput) tags.push('Image');
+            if (caps.fileInputPdf) tags.push('PDF');
+            const tagHtml = tags.length > 0
+                ? `<div class="model-capabilities">${tags.map((tag) => `<span class="model-cap-chip">${tag}</span>`).join('')}</div>`
+                : '';
+            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${model.name}"><div class="model-info"><div class="model-name">${model.name}</div>${tagHtml}</div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
         });
     });
 
@@ -372,17 +473,88 @@ function selectModel(item) {
 }
 
 function updateVisionUI() {
-    const modelData = availableModels.find(m => m.id === currentModel);
-    const btn = document.getElementById('imageUploadBtn');
-    if (btn) {
-        btn.style.display = (modelData && modelData.supportsVision) ? '' : 'none';
+    const modelData = getCurrentModelData();
+    const caps = modelData?.capabilities || {};
+    const imageBtn = document.getElementById('imageUploadBtn');
+    const fileBtn = document.getElementById('fileUploadBtn');
+    const imageModeBtn = document.getElementById('imageModeBtn');
+
+    if (imageBtn) imageBtn.style.display = caps.visionInput ? '' : 'none';
+    if (fileBtn) fileBtn.style.display = caps.fileInputPdf ? '' : 'none';
+    if (imageModeBtn) {
+        imageModeBtn.style.display = caps.imageOutput ? '' : 'none';
+        imageModeBtn.classList.toggle('active', imageGenerationMode);
     }
-    // Clear pending images when switching to non-vision model
-    if (!modelData || !modelData.supportsVision) {
+
+    if (!caps.visionInput) {
         pendingImages = [];
-        const container = document.getElementById('imagePreviewContainer');
-        if (container) container.innerHTML = '';
+        updateImagePreview();
     }
+
+    if (!caps.fileInputPdf) {
+        pendingFiles = [];
+        updateFilePreview();
+    }
+
+    if (!caps.imageOutput && imageGenerationMode) {
+        imageGenerationMode = false;
+    }
+}
+
+window.toggleImageGenerationMode = function () {
+    const modelData = getCurrentModelData();
+    if (!modelData?.capabilities?.imageOutput) return;
+    imageGenerationMode = !imageGenerationMode;
+    updateVisionUI();
+    handleInput();
+};
+
+window.handleFileUpload = function (event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach(file => {
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (!isPdf) return;
+        if (file.size > 20 * 1024 * 1024) {
+            alert('File too large. Maximum size is 20MB.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            pendingFiles.push({
+                name: file.name,
+                dataUrl: e.target.result,
+            });
+            updateFilePreview();
+            handleInput();
+        };
+        reader.readAsDataURL(file);
+    });
+    event.target.value = '';
+}
+
+function updateFilePreview() {
+    const container = document.getElementById('filePreviewContainer');
+    if (!container) return;
+    if (pendingFiles.length === 0) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = 'flex';
+    container.innerHTML = pendingFiles.map((file, idx) => `
+        <div class="file-preview-item" title="${escapeHtml(file.name)}">
+            <span class="file-preview-name">${escapeHtml(file.name)}</span>
+            <button class="file-preview-remove" onclick="window.removeFile(${idx})">&times;</button>
+        </div>
+    `).join('');
+}
+
+window.removeFile = function (index) {
+    pendingFiles.splice(index, 1);
+    updateFilePreview();
+    handleInput();
 }
 
 window.handleImageUpload = function (event) {
@@ -516,8 +688,68 @@ window.stopGeneration = function () {
     shouldStopTyping = true;
     if (abortController) abortController.abort();
     removeTypingIndicator();
+    cleanupStreamingUI();
     isProcessing = false;
     updateSendButtonState();
+}
+
+function cleanupStreamingUI() {
+    if (_thinkingTimerRef) {
+        clearInterval(_thinkingTimerRef);
+        _thinkingTimerRef = null;
+    }
+    _thinkingStartRef = null;
+    _thinkingEndTimeRef = null;
+
+    document.querySelectorAll('.assistant-message-text.streaming').forEach((el) => {
+        el.classList.remove('streaming');
+    });
+    document.querySelectorAll('.streaming-cursor, .streaming-placeholder, .streaming-code-block').forEach((el) => {
+        el.remove();
+    });
+    document.querySelectorAll('.thinking-spinner').forEach((el) => {
+        el.remove();
+    });
+
+    document.querySelectorAll('#live-thinking-section').forEach((section) => {
+        section.removeAttribute('id');
+        const label = section.querySelector('.thinking-label');
+        if (label && /^Thinking/.test(label.textContent || '')) {
+            label.textContent = 'Thought';
+        }
+        const content = section.querySelector('.thinking-content div');
+        const hasContent = !!(content && content.textContent && content.textContent.trim().length > 0);
+        if (!hasContent) section.style.display = 'none';
+    });
+}
+
+function updateSendButtonState() {
+    const button = document.getElementById('sendButton');
+    const input = document.getElementById('messageInput');
+    if (!button || !input) return;
+
+    const hasDraft = input.value.trim() !== '' || pendingImages.length > 0 || pendingFiles.length > 0;
+    const isStopMode = isProcessing;
+    const mode = isStopMode ? 'stop' : 'send';
+
+    if (button.dataset.mode !== mode) {
+        button.innerHTML = isStopMode ? SEND_BUTTON_STOP_ICON : SEND_BUTTON_SEND_ICON;
+        button.dataset.mode = mode;
+    }
+
+    button.classList.toggle('active', hasDraft || isStopMode);
+    button.classList.toggle('is-stop', isStopMode);
+    button.disabled = false;
+    button.setAttribute('title', isStopMode ? 'Stop generating' : 'Send message');
+    button.setAttribute('aria-label', isStopMode ? 'Stop generating' : 'Send message');
+}
+
+window.handleSendButtonClick = function () {
+    if (isProcessing) {
+        window.stopGeneration();
+        return;
+    }
+    window.sendMessage();
 }
 
 window.handleInput = function () {
@@ -527,47 +759,20 @@ window.handleInput = function () {
     updateSendButtonState();
 }
 
-function updateSendButtonState() {
-    const sendButton = document.getElementById('sendButton');
-    if (!sendButton) return;
-    const input = document.getElementById('messageInput');
-    const hasInput = input && (input.value.trim() !== '' || pendingImages.length > 0);
-
-    if (isProcessing) {
-        sendButton.disabled = false;
-        sendButton.classList.add('active');
-        sendButton.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg>`;
-        sendButton.title = "Stop generating";
-    } else {
-        sendButton.disabled = !hasInput;
-        sendButton.classList.toggle('active', hasInput);
-        sendButton.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
-        sendButton.title = "Send message";
-    }
-}
-
-window.handleSendClick = function() {
-    if (isProcessing) {
-        window.stopGeneration();
-    } else {
-        window.sendMessage();
-    }
-}
-
 window.handleKeyPress = function (event) {
     if (event.key === 'Enter' && !event.shiftKey) {
         // On mobile, Enter inserts a newline; use the send button to send
         const isMobile = window.innerWidth <= 768 || ('ontouchstart' in window);
         if (isMobile) return; // let default newline happen
         event.preventDefault();
-        window.handleSendClick();
+        window.sendMessage();
     }
 }
 
 window.sendSuggestion = function (text) {
     document.getElementById('messageInput').value = text;
     window.handleInput();
-    window.handleSendClick();
+    window.sendMessage();
 }
 
 window.newChat = function () {
@@ -644,7 +849,7 @@ function initMessagesContainer() {
     }
 }
 
-function addUserMessage(content, images = []) {
+function addUserMessage(content, images = [], files = []) {
     initMessagesContainer();
     const chatArea = document.getElementById('chatArea');
     const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
@@ -654,9 +859,45 @@ function addUserMessage(content, images = []) {
     if (images.length > 0) {
         imagesHtml = '<div class="user-message-images">' + images.map(img => `<img src="${img}" alt="Attached image" class="user-attached-image" onclick="window.openImageLightbox(this.src)">`).join('') + '</div>';
     }
-    messageGroup.innerHTML = `<div class="user-message-content"><div class="user-message-bubble">${imagesHtml}<div class="user-message-text">${escapeHtml(content)}</div></div><div class="assistant-actions"><button class="assistant-action-btn" onclick="window.copyUserMessage(this)"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg></button></div></div>`;
+    let filesHtml = '';
+    if (files.length > 0) {
+        filesHtml = '<div class="user-message-files">' + files.map(file => `<div class="user-attached-file">${escapeHtml(file.name || 'document.pdf')}</div>`).join('') + '</div>';
+    }
+    messageGroup.innerHTML = `<div class="user-message-content"><div class="user-message-bubble">${imagesHtml}${filesHtml}<div class="user-message-text">${escapeHtml(content)}</div></div><div class="assistant-actions"><button class="assistant-action-btn" onclick="window.copyUserMessage(this)"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="icon"><path d="M12.668 10.667C12.668 9.95614 12.668 9.46258 12.6367 9.0791C12.6137 8.79732 12.5758 8.60761 12.5244 8.46387L12.4688 8.33399C12.3148 8.03193 12.0803 7.77885 11.793 7.60254L11.666 7.53125C11.508 7.45087 11.2963 7.39395 10.9209 7.36328C10.5374 7.33197 10.0439 7.33203 9.33301 7.33203H6.5C5.78896 7.33203 5.29563 7.33195 4.91211 7.36328C4.63016 7.38632 4.44065 7.42413 4.29688 7.47559L4.16699 7.53125C3.86488 7.68518 3.61186 7.9196 3.43555 8.20703L3.36524 8.33399C3.28478 8.49198 3.22795 8.70352 3.19727 9.0791C3.16595 9.46259 3.16504 9.95611 3.16504 10.667V13.5C3.16504 14.211 3.16593 14.7044 3.19727 15.0879C3.22797 15.4636 3.28473 15.675 3.36524 15.833L3.43555 15.959C3.61186 16.2466 3.86474 16.4807 4.16699 16.6348L4.29688 16.6914C4.44063 16.7428 4.63025 16.7797 4.91211 16.8027C5.29563 16.8341 5.78896 16.835 6.5 16.835H9.33301C10.0439 16.835 10.5374 16.8341 10.9209 16.8027C11.2965 16.772 11.508 16.7152 11.666 16.6348L11.793 16.5645C12.0804 16.3881 12.3148 16.1351 12.4688 15.833L12.5244 15.7031C12.5759 15.5594 12.6137 15.3698 12.6367 15.0879C12.6681 14.7044 12.668 14.211 12.668 13.5V10.667ZM13.998 12.665C14.4528 12.6634 14.8011 12.6602 15.0879 12.6367C15.4635 12.606 15.675 12.5492 15.833 12.4688L15.959 12.3975C16.2466 12.2211 16.4808 11.9682 16.6348 11.666L16.6914 11.5361C16.7428 11.3924 16.7797 11.2026 16.8027 10.9209C16.8341 10.5374 16.835 10.0439 16.835 9.33301V6.5C16.835 5.78896 16.8341 5.29563 16.8027 4.91211C16.7797 4.63025 16.7428 4.44063 16.6914 4.29688L16.6348 4.16699C16.4807 3.86474 16.2466 3.61186 15.959 3.43555L15.833 3.36524C15.675 3.28473 15.4636 3.22797 15.0879 3.19727C14.7044 3.16593 14.211 3.16504 13.5 3.16504H10.667C9.9561 3.16504 9.46259 3.16595 9.0791 3.19727C8.79739 3.22028 8.6076 3.2572 8.46387 3.30859L8.33399 3.36524C8.03176 3.51923 7.77886 3.75343 7.60254 4.04102L7.53125 4.16699C7.4508 4.32498 7.39397 4.53655 7.36328 4.91211C7.33985 5.19893 7.33562 5.54719 7.33399 6.00195H9.33301C10.022 6.00195 10.5791 6.00131 11.0293 6.03809C11.4873 6.07551 11.8937 6.15471 12.2705 6.34668L12.4883 6.46875C12.984 6.7728 13.3878 7.20854 13.6533 7.72949L13.7197 7.87207C13.8642 8.20859 13.9292 8.56974 13.9619 8.9707C13.9987 9.42092 13.998 9.97799 13.998 10.667V12.665ZM18.165 9.33301C18.165 10.022 18.1657 10.5791 18.1289 11.0293C18.0961 11.4302 18.0311 11.7914 17.8867 12.1279L17.8203 12.2705C17.5549 12.7914 17.1509 13.2272 16.6553 13.5313L16.4365 13.6533C16.0599 13.8452 15.6541 13.9245 15.1963 13.9619C14.8593 13.9895 14.4624 13.9935 13.9951 13.9951C13.9935 14.4624 13.9895 14.8593 13.9619 15.1963C13.9292 15.597 13.864 15.9576 13.7197 16.2939L13.6533 16.4365C13.3878 16.9576 12.9841 17.3941 12.4883 17.6982L12.2705 17.8203C11.8937 18.0123 11.4873 18.0915 11.0293 18.1289C10.5791 18.1657 10.022 18.165 9.33301 18.165H6.5C5.81091 18.165 5.25395 18.1657 4.80371 18.1289C4.40306 18.0962 4.04235 18.031 3.70606 17.8867L3.56348 17.8203C3.04244 17.5548 2.60585 17.151 2.30176 16.6553L2.17969 16.4365C1.98788 16.0599 1.90851 15.6541 1.87109 15.1963C1.83431 14.746 1.83496 14.1891 1.83496 13.5V10.667C1.83496 9.978 1.83432 9.42091 1.87109 8.9707C1.90851 8.5127 1.98772 8.10625 2.17969 7.72949L2.30176 7.51172C2.60586 7.0159 3.04236 6.6122 3.56348 6.34668L3.70606 6.28027C4.04237 6.136 4.40303 6.07083 4.80371 6.03809C5.14051 6.01057 5.53708 6.00551 6.00391 6.00391C6.00551 5.53708 6.01057 5.14051 6.03809 4.80371C6.0755 4.34588 6.15483 3.94012 6.34668 3.56348L6.46875 3.34473C6.77282 2.84912 7.20856 2.44514 7.72949 2.17969L7.87207 2.11328C8.20855 1.96886 8.56979 1.90385 8.9707 1.87109C9.42091 1.83432 9.978 1.83496 10.667 1.83496H13.5C14.1891 1.83496 14.746 1.83431 15.1963 1.87109C15.6541 1.90851 16.0599 1.98788 16.4365 2.17969L16.6553 2.30176C17.151 2.60585 17.5548 3.04244 17.8203 3.56348L17.8867 3.70606C18.031 4.04235 18.0962 4.40306 18.1289 4.80371C18.1657 5.25395 18.165 5.81091 18.165 6.5V9.33301Z"></path></svg></button><button class="assistant-action-btn" title="Edit message" onclick="window.editUserMessage(this)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button></div></div>`;
     messagesContainer.appendChild(messageGroup);
+    updateEditButtonVisibility();
     if (isScrolledToBottom) scrollToBottom(true);
+}
+
+function parseUserContentForRender(content) {
+    if (!Array.isArray(content)) {
+        return { text: String(content || ''), images: [], files: [] };
+    }
+
+    const images = [];
+    const files = [];
+    const textParts = [];
+
+    content.forEach((part) => {
+        if (!part || typeof part !== 'object') return;
+        if (part.type === 'text' && part.text) textParts.push(part.text);
+        if (part.type === 'image_url' && part.image_url?.url) images.push(part.image_url.url);
+        if (part.type === 'file' && part.file) {
+            files.push({ name: part.file.filename || 'document.pdf' });
+        }
+    });
+
+    return { text: textParts.join('\n').trim(), images, files };
+}
+
+// Show edit button only on the last user message
+function updateEditButtonVisibility() {
+    if (!messagesContainer) return;
+    const userGroups = messagesContainer.querySelectorAll('.message-group.user');
+    userGroups.forEach(g => g.classList.remove('edit-eligible'));
+    if (userGroups.length > 0) {
+        userGroups[userGroups.length - 1].classList.add('edit-eligible');
+    }
 }
 
 // --- Core Logic ---
@@ -666,6 +907,16 @@ async function addAssistantMessage(content, showTyping = true) {
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group assistant';
     const chatArea = document.getElementById('chatArea');
+
+    let imagePayload = null;
+    if (typeof content === 'string' && content.startsWith('__IMAGE_RESPONSE__')) {
+        try {
+            imagePayload = JSON.parse(content.slice('__IMAGE_RESPONSE__'.length));
+            content = imagePayload?.text || '';
+        } catch {
+            imagePayload = null;
+        }
+    }
 
     let thinkingContent = '';
     let finalContent = content;
@@ -697,6 +948,9 @@ async function addAssistantMessage(content, showTyping = true) {
             <button class="assistant-action-btn" title="Copy rich text for Google Docs" onclick="window.copyAssistantForDocs(this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-width="2"/><path d="M14 2v6h6" stroke-width="2"/><path d="M8 13h8M8 17h8M8 9h3" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
+            <button class="assistant-action-btn" title="Retry" onclick="window.retryLastMessage(this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
         </div>
     </div>`;
 
@@ -704,21 +958,17 @@ async function addAssistantMessage(content, showTyping = true) {
     messagesContainer.appendChild(messageGroup);
     const textDiv = messageGroup.querySelector('.assistant-message-text');
 
-    if (showTyping) {
-        const chunkSize = 5;
-        let displayedText = '';
-        for (let i = 0; i < finalContent.length; i += chunkSize) {
-            if (shouldStopTyping) break;
-            const isScrolledToBottom = chatArea.scrollHeight - chatArea.clientHeight <= chatArea.scrollTop + 10;
-            displayedText += finalContent.substring(i, i + chunkSize);
-            textDiv.innerHTML = formatContent(displayedText);
-            try { renderMathInElement(textDiv, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false }); } catch (e) { }
-            if (isScrolledToBottom) chatArea.scrollTop = chatArea.scrollHeight;
-            await new Promise(resolve => setTimeout(resolve, 8));
+    // Render full content immediately — no typing animation for history/loaded messages
+    textDiv.innerHTML = canvasMode ? formatContentForCanvas(finalContent) : formatContent(finalContent);
+    if (imagePayload?.images?.length) {
+        const imagesHtml = imagePayload.images.map((image) => {
+            const src = image.url ? image.url : (image.b64 ? `data:image/png;base64,${image.b64}` : '');
+            if (!src) return '';
+            return `<img src="${src}" alt="Generated image" class="assistant-generated-image" onclick="window.openImageLightbox(this.src)">`;
+        }).join('');
+        if (imagesHtml) {
+            textDiv.innerHTML += `<div class="assistant-generated-images">${imagesHtml}</div>`;
         }
-        if (!shouldStopTyping) textDiv.innerHTML = formatContent(finalContent);
-    } else {
-        textDiv.innerHTML = canvasMode ? formatContentForCanvas(finalContent) : formatContent(finalContent);
     }
 
     renderMathInElement(messageGroup, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false });
@@ -735,9 +985,9 @@ function showTypingIndicator() {
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group assistant';
     messageGroup.id = 'typing-indicator-group';
-    const currentModelData = availableModels.find(m => m.id === currentModel);
+    const currentModelData = getCurrentModelData();
     let html = '<div class="assistant-message-content">';
-    if (currentModelData?.supportsThinking) html += `<div class="thinking-section"><div class="thinking-header"><svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg><span class="thinking-label">Thinking</span><div class="thinking-spinner"><span></span><span></span><span></span></div></div></div>`;
+    if (currentModelData?.capabilities?.reasoning) html += `<div class="thinking-section"><div class="thinking-header"><svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg><span class="thinking-label">Thinking</span><div class="thinking-spinner"><span></span><span></span><span></span></div></div></div>`;
     html += `<div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
     messageGroup.innerHTML = html;
     messagesContainer.appendChild(messageGroup);
@@ -947,10 +1197,17 @@ function formatContent(raw) {
 
 
 window.sendMessage = async function () {
+    const hasSupportedModel = await ensureCurrentModelSupported(true, true);
+    if (!hasSupportedModel) {
+        showToast('No supported models are currently available.', 'error');
+        return;
+    }
+
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
     const images = [...pendingImages]; // snapshot before clearing
-    if ((!message && images.length === 0) || isProcessing) return;
+    const files = [...pendingFiles];
+    if ((!message && images.length === 0 && files.length === 0) || isProcessing) return;
 
     shouldStopTyping = false;
     abortController = new AbortController();
@@ -964,20 +1221,30 @@ window.sendMessage = async function () {
         };
     }
 
-    addUserMessage(message, images);
+    addUserMessage(message, images, files);
     input.value = '';
     input.style.height = 'auto';
     pendingImages = [];
+    pendingFiles = [];
     updateImagePreview();
+    updateFilePreview();
     handleInput();
 
     // Build message content for API
     let messageContent;
-    if (images.length > 0) {
-        // OpenRouter multi-part content format for vision models
+    if (images.length > 0 || files.length > 0) {
         messageContent = [];
         images.forEach(img => {
             messageContent.push({ type: 'image_url', image_url: { url: img } });
+        });
+        files.forEach(file => {
+            messageContent.push({
+                type: 'file',
+                file: {
+                    filename: file.name,
+                    file_data: file.dataUrl,
+                },
+            });
         });
         if (message) {
             messageContent.push({ type: 'text', text: message });
@@ -986,6 +1253,46 @@ window.sendMessage = async function () {
         messageContent = message;
     }
     conversationHistory.push({ role: 'user', content: messageContent });
+
+    if (imageGenerationMode) {
+        isProcessing = true;
+        updateSendButtonState();
+        showTypingIndicator();
+        try {
+            const imageResponse = await fetch(API_IMAGE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: currentModel,
+                    prompt: message || 'Generate an image',
+                }),
+                signal: abortController.signal,
+            });
+
+            removeTypingIndicator();
+            const imagePayload = await imageResponse.json().catch(() => ({}));
+            if (!imageResponse.ok) {
+                throw new Error(imagePayload?.error || 'Image generation failed.');
+            }
+
+            const marker = `__IMAGE_RESPONSE__${JSON.stringify(imagePayload)}`;
+            addAssistantMessage(marker, false);
+            conversationHistory.push({ role: 'assistant', content: marker });
+            saveCurrentChat();
+            renderChatHistory();
+        } catch (error) {
+            removeTypingIndicator();
+            if (error.name !== 'AbortError') {
+                showToast('Error: ' + error.message, 'error');
+            }
+        } finally {
+            isProcessing = false;
+            shouldStopTyping = false;
+            abortController = null;
+            updateSendButtonState();
+        }
+        return;
+    }
 
     // Reset accumulated content for new turn
     accumulatedContent = '';
@@ -1012,22 +1319,12 @@ window.sendMessage = async function () {
             // Check if canvas is open with code
             if (typeof window.getCanvasState === 'function') {
                 const canvas = window.getCanvasState();
+                canvasSystemContent = buildCanvasSystemPrompt(canvas);
                 if (canvas.isOpen && canvas.code) {
-                    canvasSystemContent = `You are in CANVAS MODE editing ${canvas.langLabel} code. The user's current code is shown below. CRITICAL RULES:
-1. When the user asks for a change, output the COMPLETE updated file in a single \`\`\`${canvas.lang} code block. Include ALL the original code with the requested modifications applied.
-2. Modify ONLY the parts the user asks about — keep everything else EXACTLY as-is.
-3. Put your explanation text OUTSIDE the code block (before or after).
-4. Keep explanations brief — focus on what you changed and why.
-
-Current code in canvas:
-\`\`\`${canvas.lang}
-${canvas.code}
-\`\`\``;
-                } else {
-                    canvasSystemContent = 'You are in CANVAS MODE. Write clean, complete, runnable code in a single fenced code block with correct language tag. Keep explanations brief.';
+                    canvasSystemContent += `\n\nCurrent code in canvas:\n\`\`\`${canvas.lang}\n${canvas.code}\n\`\`\``;
                 }
             } else {
-                canvasSystemContent = 'You are in CANVAS MODE. Write clean, complete, runnable code in a single fenced code block with correct language tag. Keep explanations brief.';
+                canvasSystemContent = buildCanvasSystemPrompt(null);
             }
             messagesForAPI = [{ role: 'system', content: canvasSystemContent }, ...messagesForAPI];
         }
@@ -1073,6 +1370,7 @@ ${canvas.code}
         messageGroup.innerHTML = initialHtml;
         messagesContainer.appendChild(messageGroup);
         const assistantMessageContainer = messageGroup.querySelector('.assistant-message-text');
+        assistantMessageContainer.classList.add('streaming');
         const thinkingContentContainer = messageGroup.querySelector('#live-thinking-content');
         const thinkingSection = messageGroup.querySelector('#live-thinking-section');
         let thinkingRevealed = false;
@@ -1231,10 +1529,16 @@ ${canvas.code}
             <button class="assistant-action-btn" title="Copy rich text for Google Docs" onclick="window.copyAssistantForDocs(this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-width="2"/><path d="M14 2v6h6" stroke-width="2"/><path d="M8 13h8M8 17h8M8 9h3" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
+            <button class="assistant-action-btn" title="Retry" onclick="window.retryLastMessage(this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
         </div>
         </div> `;
 
         messageGroup.innerHTML = finalHtml;
+        // Remove streaming class from finalized content
+        const finalTextEl = messageGroup.querySelector('.assistant-message-text');
+        if (finalTextEl) finalTextEl.classList.remove('streaming');
         renderMathInElement(messageGroup, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false });
         messageGroup.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
 
@@ -1273,6 +1577,7 @@ ${canvas.code}
         }
     } finally {
         isProcessing = false;
+        if (shouldStopTyping) cleanupStreamingUI();
         shouldStopTyping = false;
         updateSendButtonState();
         abortController = null;
@@ -1332,33 +1637,211 @@ function formatThinkingContent(text) {
     return formatContent(formatted);
 }
 
+/**
+ * Strip trailing incomplete code/LaTeX blocks from text for clean live display.
+ * Returns { displayText, isWritingCode, isWritingMath } so the caller can
+ * show appropriate placeholders.
+ */
+function getDisplayableContent(text) {
+    const sourceText = text || '';
+    let displayText = sourceText;
+    let isWritingCode = false;
+    let isWritingMath = false;
+    let unclosedCodeLang = 'plaintext';
+    let unclosedCodeContent = '';
+
+    // Count triple-backticks. If odd, we have an unclosed code block.
+    const backtickMatches = displayText.match(/```/g);
+    if (backtickMatches && backtickMatches.length % 2 !== 0) {
+        const lastOpen = displayText.lastIndexOf('```');
+        const fenceTail = displayText.substring(lastOpen + 3);
+        const firstNewline = fenceTail.indexOf('\n');
+        let lang = 'plaintext';
+        let code = '';
+
+        if (firstNewline !== -1) {
+            lang = fenceTail.substring(0, firstNewline).trim() || 'plaintext';
+            code = fenceTail.substring(firstNewline + 1);
+        } else {
+            lang = fenceTail.trim() || 'plaintext';
+        }
+
+        unclosedCodeLang = normalizeCodeLang(lang);
+        unclosedCodeContent = code;
+        displayText = displayText.substring(0, lastOpen);
+        isWritingCode = true;
+    }
+
+    // Check for unclosed display math $$ … $$
+    const ddMatches = displayText.match(/\$\$/g);
+    if (ddMatches && ddMatches.length % 2 !== 0) {
+        const lastOpen = displayText.lastIndexOf('$$');
+        displayText = displayText.substring(0, lastOpen);
+        isWritingMath = true;
+    }
+
+    // Check for unclosed \[ … \]
+    const openBracket = (displayText.match(/\\\[/g) || []).length;
+    const closeBracket = (displayText.match(/\\\]/g) || []).length;
+    if (openBracket > closeBracket) {
+        const lastOpen = displayText.lastIndexOf('\\[');
+        displayText = displayText.substring(0, lastOpen);
+        isWritingMath = true;
+    }
+
+    // Check for unclosed \( … \)
+    const openParen = (displayText.match(/\\\(/g) || []).length;
+    const closeParen = (displayText.match(/\\\)/g) || []).length;
+    if (openParen > closeParen) {
+        const lastOpen = displayText.lastIndexOf('\\(');
+        displayText = displayText.substring(0, lastOpen);
+        isWritingMath = true;
+    }
+
+    const closedFenceCount = (displayText.match(/```/g) || []).length;
+    const completeCodeBlockCount = Math.floor(closedFenceCount / 2);
+
+    return {
+        displayText: displayText.trimEnd(),
+        isWritingCode,
+        isWritingMath,
+        unclosedCodeLang,
+        unclosedCodeContent,
+        completeCodeBlockCount
+    };
+}
+
+/**
+ * Check if math delimiters are all closed before rendering KaTeX.
+ */
+function hasUnclosedMath(text) {
+    if (!text) return false;
+    const codeBlocks = (text.match(/```/g) || []).length;
+    if (codeBlocks % 2 !== 0) return true;
+    const doubleDollar = (text.match(/\$\$/g) || []).length;
+    if (doubleDollar % 2 !== 0) return true;
+    const openBracket = (text.match(/\\\[/g) || []).length;
+    const closeBracket = (text.match(/\\\]/g) || []).length;
+    if (openBracket > closeBracket) return true;
+    const openParen = (text.match(/\\\(/g) || []).length;
+    const closeParen = (text.match(/\\\)/g) || []).length;
+    if (openParen > closeParen) return true;
+    return false;
+}
+
+function normalizeCodeLang(lang) {
+    const normalized = String(lang || 'plaintext').toLowerCase().trim();
+    const cleaned = normalized.replace(/[^a-z0-9_+\-#]/g, '');
+    return cleaned || 'plaintext';
+}
+
+function getAdaptiveRenderIntervalMs(queueSize) {
+    if (queueSize > 240) return 22;
+    if (queueSize > 120) return 32;
+    if (queueSize > 40) return 48;
+    return 68;
+}
+
+function buildStreamingRenderState(rawText) {
+    const { displayText, isWritingCode, isWritingMath, unclosedCodeLang, unclosedCodeContent, completeCodeBlockCount } = getDisplayableContent(rawText);
+    let rendered = formatContent(displayText);
+
+    if (isWritingCode) {
+        const lang = normalizeCodeLang(unclosedCodeLang);
+        const langLabel = lang === 'plaintext' ? 'code' : lang;
+        rendered += `<div class="streaming-code-block">
+            <div class="streaming-code-block-header">${escapeHtml(langLabel)} <span>streaming</span></div>
+            <pre><code class="language-${lang}">${escapeHtml(unclosedCodeContent || '')}</code></pre>
+        </div>`;
+    } else if (isWritingMath) {
+        rendered += '<div class="streaming-placeholder"><div class="streaming-placeholder-dots"><span></span><span></span><span></span></div><span>Writing math...</span></div>';
+    }
+
+    if (!isWritingCode) {
+        rendered += '<span class="streaming-cursor">▋</span>';
+    }
+    const signature = `${displayText.length}|${isWritingCode ? 1 : 0}|${isWritingMath ? 1 : 0}|${unclosedCodeContent.length}|${completeCodeBlockCount}`;
+
+    return { html: rendered, signature };
+}
+
+function buildCanvasStreamingRenderState(rawText) {
+    let liveText = rawText || '';
+    liveText = liveText.replace(/```[a-zA-Z0-9_+-]*\n[\s\S]*?```/g, '');
+
+    const unclosedIdx = liveText.indexOf('```');
+    let isWritingCode = false;
+    if (unclosedIdx !== -1) {
+        liveText = liveText.substring(0, unclosedIdx);
+        isWritingCode = true;
+    }
+
+    liveText = liveText.replace(/\n{3,}/g, '\n\n').trim();
+    const writingBadge = '<div class="canvas-applied-badge" style="opacity:0.7"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Writing to canvas...</div>';
+
+    let html;
+    if (liveText) {
+        const cursorHtml = isWritingCode ? '' : '<span class="streaming-cursor">▋</span>';
+        html = formatContent(liveText) + cursorHtml + (isWritingCode ? writingBadge : '');
+    } else {
+        html = writingBadge;
+    }
+
+    const signature = `${liveText.length}|${isWritingCode ? 1 : 0}`;
+    return { html, signature };
+}
+
 async function processRenderQueue(contentContainer, thinkingContainer, thinkingSection, onThinkingRevealed) {
     if (isRendering) return;
     isRendering = true;
 
+    let lastRenderTime = 0;
+    let lastMathRenderTime = 0;
+    let lastRenderedSignature = '';
+    let pendingContentUpdate = false;
+    let pendingReasoningUpdate = false;
+
     const process = () => {
-        if (renderQueue.length === 0 || shouldStopTyping) {
+        if (renderQueue.length === 0 && !pendingContentUpdate && !pendingReasoningUpdate) {
+            // Nothing left — do one final render to flush any pending partial
+            isRendering = false;
+            return;
+        }
+        if (shouldStopTyping) {
+            if (pendingReasoningUpdate && thinkingContainer) {
+                const innerDiv = thinkingContainer.querySelector('div');
+                if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedReasoning);
+            }
+            if (contentContainer) {
+                const staticContent = canvasMode ? formatContentForCanvas(accumulatedContent) : formatContent(accumulatedContent);
+                contentContainer.innerHTML = staticContent;
+                contentContainer.classList.remove('streaming');
+            }
+            if (thinkingSection) {
+                const spinner = thinkingSection.querySelector('.thinking-spinner');
+                if (spinner) spinner.remove();
+                const label = thinkingSection.querySelector('.thinking-label');
+                if (label && /^Thinking/.test(label.textContent || '')) label.textContent = 'Thought';
+                const hasThinking = (accumulatedReasoning || '').trim().length > 0;
+                if (!hasThinking) thinkingSection.style.display = 'none';
+            }
             isRendering = false;
             return;
         }
 
-        const queueSize = renderQueue.length;
-        const processCount = queueSize > 50 ? 20 : (queueSize > 20 ? 10 : (queueSize > 5 ? 2 : 1));
-
-        let hasContentUpdate = false;
-        let hasReasoningUpdate = false;
-
-        for (let i = 0; i < processCount && renderQueue.length > 0; i++) {
+        // --- Phase 1: Drain ALL available tokens (no limit) ---
+        // This never blocks — we just accumulate strings.
+        while (renderQueue.length > 0) {
             const delta = renderQueue.shift();
 
             // Handle dedicated reasoning fields
             const reasoning = delta?.reasoning_content || delta?.reasoning;
             if (reasoning) {
                 accumulatedReasoning += reasoning;
-                hasReasoningUpdate = true;
+                pendingReasoningUpdate = true;
             }
 
-            // Handle content â€” parse <think> tags in real-time
+            // Handle content — parse <think> tags in real-time
             const content = delta?.content;
             if (content) {
                 let remaining = content;
@@ -1367,12 +1850,12 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                         const closeIdx = remaining.indexOf('</think>');
                         if (closeIdx !== -1) {
                             accumulatedReasoning += remaining.substring(0, closeIdx);
-                            hasReasoningUpdate = true;
+                            pendingReasoningUpdate = true;
                             insideThinkTag = false;
                             remaining = remaining.substring(closeIdx + 8);
                         } else {
                             accumulatedReasoning += remaining;
-                            hasReasoningUpdate = true;
+                            pendingReasoningUpdate = true;
                             remaining = '';
                         }
                     } else {
@@ -1380,13 +1863,13 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
                         if (openIdx !== -1) {
                             if (openIdx > 0) {
                                 accumulatedContent += remaining.substring(0, openIdx);
-                                hasContentUpdate = true;
+                                pendingContentUpdate = true;
                             }
                             insideThinkTag = true;
                             remaining = remaining.substring(openIdx + 7);
                         } else {
                             accumulatedContent += remaining;
-                            hasContentUpdate = true;
+                            pendingContentUpdate = true;
                             remaining = '';
                         }
                     }
@@ -1394,91 +1877,68 @@ async function processRenderQueue(contentContainer, thinkingContainer, thinkingS
             }
         }
 
-        // Reveal thinking section as soon as reasoning arrives
-        if (hasReasoningUpdate && thinkingSection && thinkingSection.style.display === 'none') {
-            thinkingSection.style.display = '';
-            if (onThinkingRevealed) onThinkingRevealed();
-        }
+        // --- Phase 2: Throttled DOM update ---
+        const now = Date.now();
+        const elapsed = now - lastRenderTime;
 
-        if (hasReasoningUpdate && thinkingContainer) {
-            const innerDiv = thinkingContainer.querySelector('div');
-            if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedReasoning);
-        }
+        const RENDER_INTERVAL_MS = getAdaptiveRenderIntervalMs(renderQueue.length);
+        if (elapsed >= RENDER_INTERVAL_MS && (pendingContentUpdate || pendingReasoningUpdate)) {
+            lastRenderTime = now;
+            let didRenderContent = false;
 
-        if (hasContentUpdate) {
-            // Stop thinking timer when actual content starts arriving (reasoning ended)
-            if (_thinkingTimerRef && thinkingSection) {
-                clearInterval(_thinkingTimerRef);
-                const elapsed = _thinkingStartRef ? Math.round((Date.now() - _thinkingStartRef) / 1000) : 0;
-                const labelEl = thinkingSection.querySelector('.thinking-label');
-                if (labelEl) labelEl.textContent = `Thought for ${elapsed}s`;
-                _thinkingTimerRef = null;
-                _thinkingEndTimeRef = Date.now();
+            // Reveal thinking section as soon as reasoning arrives
+            if (pendingReasoningUpdate && thinkingSection && thinkingSection.style.display === 'none') {
+                thinkingSection.style.display = '';
+                if (onThinkingRevealed) onThinkingRevealed();
             }
-            if (canvasMode) {
-                // In canvas mode, hide code blocks from live display
-                let liveText = accumulatedContent;
-                // Remove completed code blocks
-                liveText = liveText.replace(/```[a-zA-Z0-9_+-]*\n[\s\S]*?```/g, '');
-                // If there's an unclosed ```, hide everything after it
-                const unclosedIdx = liveText.indexOf('```');
-                let isWritingCode = false;
-                if (unclosedIdx !== -1) {
-                    liveText = liveText.substring(0, unclosedIdx);
-                    isWritingCode = true;
-                }
-                liveText = liveText.replace(/\n{3,}/g, '\n\n').trim();
-                // Badge HTML — appended AFTER formatContent to avoid escaping
-                const writingBadge = '<div class="canvas-applied-badge" style="opacity:0.7"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Writing to canvas…</div>';
-                if (liveText) {
-                    contentContainer.innerHTML = formatContent(liveText + ' ▋') + (isWritingCode ? writingBadge : '');
-                } else {
-                    contentContainer.innerHTML = writingBadge;
-                }
-            } else {
-                contentContainer.innerHTML = formatContent(accumulatedContent + '▋');
+
+            if (pendingReasoningUpdate && thinkingContainer) {
+                const innerDiv = thinkingContainer.querySelector('div');
+                if (innerDiv) innerDiv.innerHTML = formatThinkingContent(accumulatedReasoning);
             }
-        }
 
-        // Periodically render math with KaTeX (throttled, skip if incomplete delimiters)
-        if ((hasContentUpdate || hasReasoningUpdate) && typeof renderMathInElement === 'function') {
-            const now = Date.now();
-            if (!processRenderQueue._lastMathRender || now - processRenderQueue._lastMathRender > 1500) {
-                // Check if math delimiters are all closed before rendering
-                const hasUnclosedMath = (text) => {
-                    if (!text) return false;
-                    // Check for unclosed code blocks (```)
-                    const codeBlocks = (text.match(/```/g) || []).length;
-                    if (codeBlocks % 2 !== 0) return true;
-                    // Check for unclosed $$ (display math)
-                    const doubleDollar = (text.match(/\$\$/g) || []).length;
-                    if (doubleDollar % 2 !== 0) return true;
-                    // Check for unclosed \[ or \(
-                    const openBracket = (text.match(/\\\[/g) || []).length;
-                    const closeBracket = (text.match(/\\\]/g) || []).length;
-                    if (openBracket > closeBracket) return true;
-                    const openParen = (text.match(/\\\(/g) || []).length;
-                    const closeParen = (text.match(/\\\)/g) || []).length;
-                    if (openParen > closeParen) return true;
-                    return false;
-                };
+            if (pendingContentUpdate) {
+                // Stop thinking timer when actual content starts arriving
+                if (_thinkingTimerRef && thinkingSection) {
+                    clearInterval(_thinkingTimerRef);
+                    const elapsedSec = _thinkingStartRef ? Math.round((Date.now() - _thinkingStartRef) / 1000) : 0;
+                    const labelEl = thinkingSection.querySelector('.thinking-label');
+                    if (labelEl) labelEl.textContent = `Thought for ${elapsedSec}s`;
+                    _thinkingTimerRef = null;
+                    _thinkingEndTimeRef = Date.now();
+                }
 
-                const contentReady = hasContentUpdate && !hasUnclosedMath(accumulatedContent);
-                const reasoningReady = hasReasoningUpdate && !hasUnclosedMath(accumulatedReasoning);
+                const liveState = canvasMode
+                    ? buildCanvasStreamingRenderState(accumulatedContent)
+                    : buildStreamingRenderState(accumulatedContent);
 
-                if (contentReady || reasoningReady) {
-                    processRenderQueue._lastMathRender = now;
+                if (liveState.signature !== lastRenderedSignature) {
+                    contentContainer.innerHTML = liveState.html;
+                    lastRenderedSignature = liveState.signature;
+                    didRenderContent = true;
+                }
+            }
+
+            // Keep math rendering lightweight during stream; full formatting runs on finalize.
+            if (pendingReasoningUpdate && thinkingContainer && typeof renderMathInElement === 'function') {
+                if (now - lastMathRenderTime > 1800 && !hasUnclosedMath(accumulatedReasoning)) {
+                    lastMathRenderTime = now;
                     try {
                         const katexOpts = { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false };
-                        if (contentReady) renderMathInElement(contentContainer, katexOpts);
-                        if (reasoningReady && thinkingContainer) renderMathInElement(thinkingContainer, katexOpts);
+                        renderMathInElement(thinkingContainer, katexOpts);
                     } catch (e) { }
                 }
             }
-        }
 
-        if (isAutoScrollEnabled) {
-            scrollToBottom(true);
+            // Reset pending flags after render
+            pendingContentUpdate = false;
+            pendingReasoningUpdate = false;
+
+            // Instant scroll during streaming — no competing smooth scroll
+            if (isAutoScrollEnabled && (didRenderContent || pendingReasoningUpdate)) {
+                const chatArea = document.getElementById('chatArea');
+                if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+            }
         }
 
         requestAnimationFrame(process);
@@ -1630,6 +2090,180 @@ window.copyAssistantForDocs = async function (button) {
     }
 }
 window.copyUserMessage = function (button) { const messageText = button.closest('.user-message-content').querySelector('.user-message-text'); navigator.clipboard.writeText(messageText ? messageText.innerText : '').then(() => { const originalContent = button.innerHTML; button.innerHTML = `<svg viewBox = "0 0 24 24" fill = "none" stroke = "currentColor"> <path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg> `; setTimeout(() => { button.innerHTML = originalContent; }, 2000); }).catch(err => console.error('Failed to copy text: ', err)); }
+
+window.retryLastMessage = function (button) {
+    // Prevent retry while a response is being generated
+    if (isProcessing) {
+        showToast('Please wait for the current response to finish.', 'warning');
+        return;
+    }
+
+    // Find the assistant message group that contains this button
+    const assistantGroup = button.closest('.message-group.assistant');
+    if (!assistantGroup) return;
+
+    // Find the preceding user message group
+    const userGroup = assistantGroup.previousElementSibling;
+    if (!userGroup || !userGroup.classList.contains('user')) {
+        showToast('Could not find the original prompt to retry.', 'error');
+        return;
+    }
+
+    // Extract the original user message text
+    const userTextEl = userGroup.querySelector('.user-message-text');
+    const originalMessage = userTextEl ? userTextEl.innerText.trim() : '';
+    if (!originalMessage) {
+        showToast('Could not extract the original prompt.', 'error');
+        return;
+    }
+
+    // Remove the last assistant + user pair from conversation history
+    // Walk backward: remove the last assistant, then the last user
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        if (conversationHistory[i].role === 'assistant') {
+            conversationHistory.splice(i, 1);
+            break;
+        }
+    }
+    for (let i = conversationHistory.length - 1; i >= 0; i--) {
+        if (conversationHistory[i].role === 'user') {
+            conversationHistory.splice(i, 1);
+            break;
+        }
+    }
+
+    // Remove both message groups from DOM
+    assistantGroup.remove();
+    userGroup.remove();
+
+    // Save updated state
+    saveCurrentChat();
+
+    // Re-send the original message by populating the input and triggering send
+    const input = document.getElementById('messageInput');
+    input.value = originalMessage;
+    sendMessage();
+};
+
+window.editUserMessage = function (button) {
+    if (isProcessing) {
+        showToast('Please wait for the current response to finish.', 'warning');
+        return;
+    }
+
+    const userGroup = button.closest('.message-group.user');
+    if (!userGroup) return;
+
+    const bubble = userGroup.querySelector('.user-message-bubble');
+    const textEl = userGroup.querySelector('.user-message-text');
+    if (!textEl || !bubble) return;
+
+    const originalText = textEl.innerText.trim();
+
+    // Don't open a second editor
+    if (bubble.querySelector('.edit-message-textarea')) return;
+
+    // Preserve bubble markup so cancel can restore it in-place.
+    bubble.dataset.editOriginalHtml = bubble.innerHTML;
+
+    // Hide the actions bar while editing
+    const actionsBar = userGroup.querySelector('.assistant-actions');
+    if (actionsBar) actionsBar.style.display = 'none';
+
+    // Replace bubble content with an editor
+    const editorHtml = `
+        <div class="edit-message-card">
+            <textarea class="edit-message-textarea" rows="3">${originalText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+            <div class="edit-message-actions">
+                <button class="edit-cancel-btn" onclick="window.cancelEditMessage(this)">Cancel</button>
+                <button class="edit-save-btn" onclick="window.submitEditMessage(this)">Send</button>
+            </div>
+        </div>
+    `;
+    bubble.innerHTML = editorHtml;
+    const textarea = bubble.querySelector('.edit-message-textarea');
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    // Escape to cancel
+    textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            window.cancelEditMessage(textarea);
+        }
+    });
+};
+
+window.cancelEditMessage = function (el) {
+    const userGroup = el.closest('.message-group.user');
+    if (!userGroup) return;
+
+    const bubble = userGroup.querySelector('.user-message-bubble');
+    if (!bubble) return;
+
+    if (bubble.dataset.editOriginalHtml) {
+        bubble.innerHTML = bubble.dataset.editOriginalHtml;
+        delete bubble.dataset.editOriginalHtml;
+    }
+
+    const actionsBar = userGroup.querySelector('.assistant-actions');
+    if (actionsBar) actionsBar.style.display = '';
+    updateEditButtonVisibility();
+};
+
+window.submitEditMessage = function (el) {
+    if (isProcessing) return;
+
+    const userGroup = el.closest('.message-group.user');
+    if (!userGroup) return;
+
+    const textarea = userGroup.querySelector('.edit-message-textarea');
+    if (!textarea) return;
+
+    const newText = textarea.value.trim();
+    if (!newText) {
+        showToast('Message cannot be empty.', 'warning');
+        return;
+    }
+
+    // Find the index of this user group in the DOM to map to conversationHistory
+    const allUserGroups = Array.from(messagesContainer.querySelectorAll('.message-group.user'));
+    const userIndex = allUserGroups.indexOf(userGroup);
+
+    // Find the corresponding user entry in conversationHistory
+    let historyIndex = -1;
+    let userCount = 0;
+    for (let i = 0; i < conversationHistory.length; i++) {
+        if (conversationHistory[i].role === 'user') {
+            if (userCount === userIndex) {
+                historyIndex = i;
+                break;
+            }
+            userCount++;
+        }
+    }
+
+    // Remove all conversation history from this user message onward
+    if (historyIndex !== -1) {
+        conversationHistory.splice(historyIndex);
+    }
+
+    // Remove this user message group and all following siblings from the DOM
+    let nextSibling = userGroup.nextElementSibling;
+    while (nextSibling) {
+        const toRemove = nextSibling;
+        nextSibling = nextSibling.nextElementSibling;
+        toRemove.remove();
+    }
+    userGroup.remove();
+
+    // Save and re-send the edited message
+    saveCurrentChat();
+    const input = document.getElementById('messageInput');
+    input.value = newText;
+    updateEditButtonVisibility();
+    sendMessage();
+};
+
 window.showToast = function (message, type = 'success') { const toast = document.createElement('div'); toast.className = `toast ${type} `; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => toast.remove(), 3000); }
 
 // Smooth scroll with requestAnimationFrame for better performance
@@ -1764,8 +2398,12 @@ function loadChat(chatId, itemEl) {
     messagesContainer.className = 'messages-container';
     chatArea.appendChild(messagesContainer);
     conversationHistory.forEach(msg => {
-        if (msg.role === 'user') addUserMessage(msg.content);
-        else if (msg.role === 'assistant') addAssistantMessage(msg.content, false);
+        if (msg.role === 'user') {
+            const parsed = parseUserContentForRender(msg.content);
+            addUserMessage(parsed.text, parsed.images, parsed.files);
+        } else if (msg.role === 'assistant') {
+            addAssistantMessage(msg.content, false);
+        }
     });
     document.querySelectorAll('#chatHistory .nav-item').forEach(item => item.classList.remove('active'));
     if (itemEl) itemEl.classList.add('active');
@@ -1800,4 +2438,5 @@ window.openImageLightbox = function (src) {
     const onKey = (e) => { if (e.key === 'Escape') { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 200); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
 }
+
 

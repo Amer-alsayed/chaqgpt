@@ -73,8 +73,10 @@ cd chaqgpt
 # Install Vercel CLI
 npm i -g vercel
 
-# Create .env file with your API key
-echo OPENROUTER_API_KEY=your_key_here > .env
+# Create .env file (multi-key preferred, single-key fallback supported)
+echo OPENROUTER_API_KEYS_JSON='["sk-or-1","sk-or-2","sk-or-3"]' > .env
+# Optional fallback
+echo OPENROUTER_API_KEY=your_key_here >> .env
 
 # Start the dev server
 vercel dev
@@ -88,10 +90,15 @@ The app will be available at `http://localhost:3000`.
 
 1. **Push** your code to GitHub
 2. **Import** the repo in [Vercel](https://vercel.com/new)
-3. **Add** the environment variable:
+3. **Add** environment variables:
    | Variable | Value |
    |---|---|
-   | `OPENROUTER_API_KEY` | Your OpenRouter API key |
+   | `OPENROUTER_API_KEYS_JSON` | JSON array of OpenRouter keys (recommended), e.g. `["sk-or-1","sk-or-2","sk-or-3"]` |
+   | `OPENROUTER_API_KEY` | Single-key fallback (optional when JSON var is present) |
+   | `OPENROUTER_KEY_COOLDOWN_RATE_LIMIT_MS` | Optional. Default `900000` (15 min) |
+   | `OPENROUTER_KEY_COOLDOWN_AUTH_MS` | Optional. Default `21600000` (6 h) |
+   | `OPENROUTER_KEY_COOLDOWN_TRANSIENT_MS` | Optional. Default `30000` (30 s) |
+   | `OPENROUTER_MAX_FAILOVER_ATTEMPTS` | Optional. Default `10` |
 4. **Deploy** — that's it!
 
 > [!TIP]

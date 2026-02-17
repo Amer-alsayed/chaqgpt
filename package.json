@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "echo 'Use: vercel dev'",
-    "start": "echo 'Use: vercel dev'"
+    "start": "echo 'Use: vercel dev'",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

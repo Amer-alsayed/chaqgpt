@@ -19,6 +19,7 @@ const chatHandler = require('./api/chat');
 const modelsHandler = require('./api/models');
 const executeHandler = require('./api/execute');
 const latexHandler = require('./api/latex');
+const imageHandler = require('./api/image');
 
 // Mount the API handler
 app.get('/api/models', async (req, res) => {
@@ -65,8 +66,19 @@ app.post('/api/latex', async (req, res) => {
   }
 });
 
+app.post('/api/image', async (req, res) => {
+  try {
+    await imageHandler(req, res);
+  } catch (error) {
+    console.error('Error in /api/image handler:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
+
 // Start the server
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
-  console.log('Note: Ensure you have a .env file with OPENROUTER_API_KEY for the chat to work.');
+  console.log('Note: Configure OPENROUTER_API_KEYS_JSON (preferred) or OPENROUTER_API_KEY in .env for OpenRouter access.');
 });

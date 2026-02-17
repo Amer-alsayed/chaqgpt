@@ -184,6 +184,7 @@
                         </svg></button>
                     <div class="header-model-dropdown" id="headerModelDropdown" onclick="event.stopPropagation()"></div>
                 </div>
+                <div id="modelStaleIndicator" class="model-stale-indicator" style="display:none;">Model list may be stale</div>
                 <div class="header-spacer"></div>
                 <button class="temp-chat-btn" id="tempChatBtn" onclick="toggleTempChat()" title="Temporary chat">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" aria-hidden="true"
@@ -212,6 +213,8 @@
                     <div class="input-wrapper">
                         <input type="file" id="imageInput" accept="image/*" multiple style="display:none"
                             onchange="handleImageUpload(event)">
+                        <input type="file" id="fileInput" accept=".pdf,application/pdf" multiple style="display:none"
+                            onchange="handleFileUpload(event)">
                         <button id="imageUploadBtn" class="image-upload-btn" style="display:none"
                             onclick="document.getElementById('imageInput').click()" title="Attach image">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -219,6 +222,16 @@
                                     stroke-linejoin="round" />
                             </svg>
                         </button>
+                        <button id="fileUploadBtn" class="file-upload-btn" style="display:none"
+                            onclick="document.getElementById('fileInput').click()" title="Attach PDF">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke-width="2" />
+                                <path d="M14 2v6h6" stroke-width="2" />
+                                <path d="M8 13h8M8 17h5" stroke-width="2" stroke-linecap="round" />
+                            </svg>
+                        </button>
+                        <button id="imageModeBtn" class="image-mode-btn" style="display:none"
+                            onclick="toggleImageGenerationMode()" title="Generate images with this model">Image</button>
                         <button id="canvasToggle" class="canvas-mode-toggle" onclick="toggleCanvasMode()"
                             title="Enable canvas mode — AI can edit code directly">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" aria-hidden="true"
@@ -232,10 +245,11 @@
                             </svg>
                         </button>
                         <div id="imagePreviewContainer" class="image-preview-container"></div>
+                        <div id="filePreviewContainer" class="file-preview-container"></div>
                         <textarea id="messageInput" class="message-input" placeholder="Ask anything" rows="1"
                             oninput="handleInput()" onkeydown="handleKeyPress(event)"></textarea><button id="sendButton"
-                            class="send-button" onclick="handleSendClick()"><svg width="20" height="20" viewBox="0 0 24 24"
-                                fill="none" stroke="currentColor">
+                            class="send-button" onclick="handleSendButtonClick()"><svg width="20" height="20"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round" />
                             </svg></button>
@@ -329,8 +343,14 @@
                         title="Code Preview"></iframe>
                 </div>
                 <div class="canvas-tab-content" data-tab="console">
-                    <div class="canvas-console-output">
-                        <div class="canvas-console-empty">Click <strong>▶ Run</strong> to execute the code</div>
+                    <div class="canvas-console-panel">
+                        <div class="canvas-console-output">
+                            <div class="canvas-console-empty">Click <strong>Run</strong> to execute the code</div>
+                        </div>
+                        <div class="canvas-console-input-row">
+                            <textarea id="canvasConsoleInput" class="canvas-console-input" placeholder="Standard input (stdin). One line per input." rows="2"></textarea>
+                            <button id="canvasConsoleRunInputBtn" class="canvas-console-run-input-btn">Run with input</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -345,3 +365,4 @@
 </body>
 
 </html>
+
