@@ -135,7 +135,7 @@ function ensureCitationGuard(answerText, sources) {
     return `${answerText}\n\nConfidence note: Evidence coverage is limited for some claims. Please verify critical facts directly from the cited sources.`;
 }
 
-async function runOpenRouterCompletion(request, model, messages, { tools = null, stream = false } = {}) {
+async function runOpenRouterCompletion(request, model, messages, { tools = null, stream = false, maxTokens = 4096 } = {}) {
     const referer = request.headers.origin || 'http://localhost:3000';
     const failoverResult = await withOpenRouterFailover({
         modelId: model,
@@ -151,7 +151,7 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
                 model,
                 messages,
                 tools: tools || undefined,
-                max_tokens: 16384,
+                max_tokens: maxTokens,
                 stream,
             }),
         }),
@@ -159,8 +159,11 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
     return failoverResult;
 }
 
-async function forceTextCompletion(request, model, messages) {
-    const result = await runOpenRouterCompletion(request, model, messages, { stream: false });
+async function forceTextCompletion(request, model, messages, options = {}) {
+    const result = await runOpenRouterCompletion(request, model, messages, {
+        stream: false,
+        maxTokens: Number(options.maxTokens) || 3072,
+    });
     if (!result.ok) return '';
     try {
         const payload = await result.response.json();
@@ -228,6 +231,7 @@ async function agenticLoop(request, model, messages) {
         const callResult = await runOpenRouterCompletion(request, model, currentMessages, {
             tools: TOOL_DEFINITIONS,
             stream: false,
+            maxTokens: 3072,
         });
         if (!callResult.ok) {
             metrics.tool_error_count += 1;
@@ -350,7 +354,7 @@ async function agenticLoop(request, model, messages) {
         },
     ];
 
-    const forcedAnswerRaw = await forceTextCompletion(request, model, forcedMessages);
+    const forcedAnswerRaw = await forceTextCompletion(request, model, forcedMessages, { maxTokens: 3072 });
     if (forcedAnswerRaw) {
         const answer = ensureCitationGuard(forcedAnswerRaw, [...sourceMap.values()]);
         metrics.sources_count = sourceMap.size;
@@ -358,6 +362,29 @@ async function agenticLoop(request, model, messages) {
         metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
         structuredMetricLog(metrics);
         return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+    }
+
+    const lastUserContent = getLastUserMessageContent(messages);
+    const contextFallback = await buildSearchContext(lastUserContent);
+    if (contextFallback?.message) {
+        const contextMessages = [
+            contextFallback.message,
+            ...messages,
+            {
+                role: 'system',
+                content: 'Write a concise, factual answer with inline citations. Do not list raw search snippets.',
+            },
+        ];
+        const contextAnswer = await forceTextCompletion(request, model, contextMessages, { maxTokens: 2048 });
+        if (contextAnswer) {
+            for (const src of contextFallback.sources || []) addSource(sourceMap, src);
+            const answer = ensureCitationGuard(contextAnswer, [...sourceMap.values()]);
+            metrics.sources_count = sourceMap.size;
+            metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
+            metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
+            structuredMetricLog(metrics);
+            return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        }
     }
 
     const synthesized = synthesizeFromSources([...sourceMap.values()]);
