@@ -53,9 +53,6 @@ const LANGUAGE_CONFIG = {
 };
 
 // ─── Pyodide State ───────────────────────────────────────────────
-let pyodideInstance = null;
-let pyodideLoading = false;
-let pyodideReady = false;
 
 // ─── Canvas Manager ──────────────────────────────────────────────
 class CanvasManager {
@@ -67,15 +64,21 @@ class CanvasManager {
         this.currentLang = '';
         this.activeTab = 'code';
         this.consoleOutput = [];
+        this.consoleStdin = '';
+        this._consoleInputBound = false;
         this.isRunning = false;
         this._latexPdfPreviewUrl = null;
         this._lastLatexCompile = null;
         this._latexRunId = 0;
         // Init resize after DOM is ready
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this._initResize());
+            document.addEventListener('DOMContentLoaded', () => {
+                this._initResize();
+                this._initConsoleInput();
+            });
         } else {
             this._initResize();
+            this._initConsoleInput();
         }
     }
 
@@ -104,7 +107,9 @@ class CanvasManager {
         this.currentCode = code;
         this.currentLang = lang;
         this.consoleOutput = [];
+        this.consoleStdin = '';
         this.isRunning = false;
+        this._initConsoleInput();
 
         const config = this.getConfig(lang);
         const panel = document.getElementById('canvasPanel');
@@ -140,6 +145,7 @@ class CanvasManager {
 
         // Clear console
         this._renderConsole();
+        this._syncConsoleInput();
 
         // Show panel
         panel.classList.add('open');
@@ -297,8 +303,10 @@ class CanvasManager {
         this.consoleOutput = [];
         this._renderConsole();
         this._updateRunButton();
+        this._syncConsoleInput();
 
         const config = this.getConfig(this.currentLang);
+        const stdin = this._getConsoleInput();
 
         try {
             switch (config.strategy) {
@@ -307,15 +315,15 @@ class CanvasManager {
                     this.switchTab('preview');
                     break;
                 case 'javascript':
-                    await this._runJavaScript(this.currentCode);
+                    await this._runJavaScript(this.currentCode, stdin);
                     this.switchTab('console');
                     break;
                 case 'python':
-                    await this._runPython(this.currentCode);
+                    await this._runPython(this.currentCode, stdin);
                     this.switchTab('console');
                     break;
                 case 'piston':
-                    await this._runPiston(this.currentCode, config.pistonLang || this.currentLang);
+                    await this._runPiston(this.currentCode, config.pistonLang || this.currentLang, stdin);
                     this.switchTab('console');
                     break;
                 case 'latex':
@@ -330,6 +338,7 @@ class CanvasManager {
         } finally {
             this.isRunning = false;
             this._updateRunButton();
+            this._syncConsoleInput();
             this._renderConsole();
         }
     }
@@ -718,7 +727,7 @@ class CanvasManager {
         }
     }
 
-    async _runJavaScript(code) {
+    async _runJavaScript(code, stdin = '') {
         this._log('info', '▶ Running JavaScript...');
         this._renderConsole();
 
@@ -728,20 +737,31 @@ class CanvasManager {
             iframe.sandbox = 'allow-scripts';
             document.body.appendChild(iframe);
 
+            let finished = false;
+            let timerId = null;
+            const finalize = () => {
+                if (finished) return;
+                finished = true;
+                window.removeEventListener('message', handler);
+                if (timerId) clearTimeout(timerId);
+                iframe.remove();
+                resolve();
+            };
+
             const handler = (e) => {
                 if (e.data?.type === 'canvas-js-result') {
                     e.data.logs.forEach(log => this._log(log.level, log.text));
                     if (e.data.error) this._log('error', e.data.error);
-                    window.removeEventListener('message', handler);
-                    iframe.remove();
-                    resolve();
+                    finalize();
                 }
             };
             window.addEventListener('message', handler);
 
+            const stdinLines = JSON.stringify(String(stdin || '').split(/\r?\n/));
             const script = `
                 <script>
                     const logs = [];
+                    const stdinLines = ${stdinLines};
                     const _log = (level, args) => logs.push({ level, text: Array.from(args).map(a => {
                         try { return typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a); } catch(e) { return String(a); }
                     }).join(' ') });
@@ -749,6 +769,11 @@ class CanvasManager {
                     console.error = function(){ _log('error', arguments); };
                     console.warn = function(){ _log('warn', arguments); };
                     console.info = function(){ _log('info', arguments); };
+                    window.prompt = function(msg){
+                        if (msg) _log('info', ['prompt:', msg]);
+                        if (!stdinLines.length) return null;
+                        return stdinLines.shift();
+                    };
 
                     let error = null;
                     try {
@@ -762,102 +787,23 @@ class CanvasManager {
             iframe.srcdoc = `<!DOCTYPE html><html><body>${script}</body></html>`;
 
             // Timeout after 10 seconds
-            setTimeout(() => {
-                window.removeEventListener('message', handler);
-                iframe.remove();
+            timerId = setTimeout(() => {
                 this._log('error', '⏱ Execution timed out (10s)');
-                resolve();
+                finalize();
             }, 10000);
         });
     }
 
-    async _runPython(code) {
-        this._log('info', '▶ Running Python...');
+    async _runPython(code, stdin = '') {
+        this._log('info', 'Running Python...');
         this._renderConsole();
-
-        // Detect unsupported GUI/native modules before loading Pyodide
-        const unsupportedModules = {
-            'pygame': 'pygame requires a native display — use HTML Canvas + JavaScript instead',
-            'tkinter': 'tkinter requires a native GUI — use HTML + JavaScript for UI',
-            'turtle': 'turtle graphics requires a native display — use HTML Canvas instead',
-            'cv2': 'OpenCV requires native binaries — not available in browser Python',
-            'opencv': 'OpenCV requires native binaries — not available in browser Python',
-            'wx': 'wxPython requires a native GUI — use HTML + JavaScript for UI',
-            'PyQt5': 'PyQt requires a native GUI — use HTML + JavaScript for UI',
-            'PyQt6': 'PyQt requires a native GUI — use HTML + JavaScript for UI',
-            'kivy': 'Kivy requires a native display — use HTML + JavaScript for UI',
-            'curses': 'curses requires a terminal — not available in browser Python',
-        };
-
-        for (const [mod, reason] of Object.entries(unsupportedModules)) {
-            const importRegex = new RegExp(`^\\s*(?:import\\s+${mod}|from\\s+${mod}\\b)`, 'm');
-            if (importRegex.test(code)) {
-                this._log('error', `❌ Cannot run: "${mod}" is not supported in browser Python.\n\n${reason}.\n\nTip: Ask the AI to rewrite this as HTML/CSS/JavaScript for the canvas preview.`);
-                this._renderConsole();
-                return;
-            }
-        }
-
-        if (!pyodideReady && !pyodideLoading) {
-            this._log('info', '📦 Loading Python runtime (first time only)...');
-            this._renderConsole();
-            pyodideLoading = true;
-
-            try {
-                // Load Pyodide from CDN
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js';
-                document.head.appendChild(script);
-
-                await new Promise((resolve, reject) => {
-                    script.onload = resolve;
-                    script.onerror = () => reject(new Error('Failed to load Pyodide'));
-                });
-
-                pyodideInstance = await loadPyodide();
-                pyodideReady = true;
-                pyodideLoading = false;
-                this._log('info', '✅ Python runtime loaded');
-                this._renderConsole();
-            } catch (err) {
-                pyodideLoading = false;
-                throw new Error('Failed to load Python runtime: ' + err.message);
-            }
-        } else if (pyodideLoading) {
-            // Wait for existing load
-            while (pyodideLoading) {
-                await new Promise(r => setTimeout(r, 100));
-            }
-            if (!pyodideReady) throw new Error('Python runtime failed to load');
-        }
-
-        // Redirect stdout/stderr
-        pyodideInstance.runPython(`
-import sys, io
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
-        `);
-
-        try {
-            const result = await pyodideInstance.runPythonAsync(code);
-            const stdout = pyodideInstance.runPython('sys.stdout.getvalue()');
-            const stderr = pyodideInstance.runPython('sys.stderr.getvalue()');
-
-            if (stdout) this._log('log', stdout);
-            if (stderr) this._log('warn', stderr);
-            if (result !== undefined && result !== null && !stdout) {
-                this._log('log', String(result));
-            }
-            if (!stdout && !stderr && (result === undefined || result === null)) {
-                this._log('info', '✅ Code executed successfully (no output)');
-            }
-        } catch (err) {
-            this._log('error', err.message);
-        }
+        await this._runPiston(code, 'python', stdin, { skipStartLog: true });
     }
 
-    async _runPiston(code, lang) {
-        this._log('info', `▶ Running ${lang}...`);
+    async _runPiston(code, lang, stdin = '', options = {}) {
+        if (!options.skipStartLog) {
+            this._log('info', `Running ${lang}...`);
+        }
         this._renderConsole();
 
         try {
@@ -867,7 +813,7 @@ sys.stderr = io.StringIO()
                 body: JSON.stringify({
                     language: lang,
                     code: code,
-                    stdin: '',
+                    stdin: String(stdin || ''),
                 })
             });
 
@@ -879,24 +825,77 @@ sys.stderr = io.StringIO()
             const result = await response.json();
 
             if (result.compile && result.compile.stderr) {
-                this._log('error', '❌ Compilation Error:\n' + result.compile.stderr);
+                this._log('error', 'Compilation Error:\n' + result.compile.stderr);
             }
             if (result.run) {
                 if (result.run.stdout) this._log('log', result.run.stdout);
                 if (result.run.stderr) this._log('error', result.run.stderr);
                 if (result.run.signal === 'SIGKILL') {
-                    this._log('error', '⏱ Execution timed out or ran out of memory');
+                    this._log('error', 'Execution timed out or ran out of memory');
                 }
                 if (!result.run.stdout && !result.run.stderr && !result.compile?.stderr) {
-                    this._log('info', '✅ Code executed successfully (no output)');
+                    this._log('info', 'Code executed successfully (no output)');
                 }
             }
         } catch (err) {
             if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
-                this._log('error', '🌐 Unable to reach execution server. Please check your internet connection.');
+                this._log('error', 'Unable to reach execution server. Please check your internet connection.');
             } else {
                 throw err;
             }
+        }
+    }
+
+    _languageSupportsStdin(config) {
+        return config.strategy === 'piston' || config.strategy === 'python' || config.strategy === 'javascript';
+    }
+
+    _initConsoleInput() {
+        if (this._consoleInputBound) return;
+
+        const input = document.getElementById('canvasConsoleInput');
+        const runBtn = document.getElementById('canvasConsoleRunInputBtn');
+        if (!input || !runBtn) return;
+
+        input.addEventListener('input', () => {
+            this.consoleStdin = input.value;
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                this.run();
+            }
+        });
+
+        runBtn.addEventListener('click', () => this.run());
+        this._consoleInputBound = true;
+        this._syncConsoleInput();
+    }
+
+    _getConsoleInput() {
+        const input = document.getElementById('canvasConsoleInput');
+        if (!input) return this.consoleStdin || '';
+        this.consoleStdin = input.value;
+        return this.consoleStdin;
+    }
+
+    _syncConsoleInput() {
+        const input = document.getElementById('canvasConsoleInput');
+        const runBtn = document.getElementById('canvasConsoleRunInputBtn');
+        if (!input || !runBtn) return;
+
+        const config = this.getConfig(this.currentLang);
+        const supportsStdin = this._languageSupportsStdin(config);
+
+        input.disabled = this.isRunning || !supportsStdin;
+        runBtn.disabled = this.isRunning || !supportsStdin;
+        input.placeholder = supportsStdin
+            ? 'Standard input (stdin). One line per input. Ctrl+Enter to run.'
+            : 'Stdin is available for executable languages.';
+
+        if (supportsStdin && input.value !== this.consoleStdin) {
+            input.value = this.consoleStdin;
         }
     }
 
@@ -916,7 +915,7 @@ sys.stderr = io.StringIO()
         if (!container) return;
 
         if (this.consoleOutput.length === 0) {
-            container.innerHTML = '<div class="canvas-console-empty">Click <strong>▶ Run</strong> to execute the code</div>';
+            container.innerHTML = '<div class="canvas-console-empty">Click <strong>Run</strong> to execute the code</div>';
             return;
         }
 
@@ -1023,6 +1022,8 @@ sys.stderr = io.StringIO()
             btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Run';
             btn.disabled = false;
         }
+
+        this._syncConsoleInput();
     }
 
     async downloadPDF() {
