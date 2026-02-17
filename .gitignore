@@ -20,3 +20,4 @@ server.out
 
 # Vercel
 .vercel/
+.vercel

@@ -68,6 +68,7 @@ function toCapabilityModel(model) {
     });
     const supportsImageOutput = outputModalities.includes('image');
     const supportsTextChat = outputModalities.includes('text') || !supportsImageOutput;
+    const supportsToolUse = supportedParameters.includes('tools') || supportedParameters.includes('tool_choice');
 
     const supportsReasoning = supportsReasoningByParameters(supportedParameters)
         || /(?:^|[\/:\-_])(r1|o1|o3)(?:[\/:\-_]|$)/i.test(id)
@@ -100,6 +101,7 @@ function toCapabilityModel(model) {
             imageOutput: supportsImageOutput,
             fileInputPdf: supportsFileInputPdf,
             textChat: supportsTextChat,
+            toolUse: supportsToolUse,
         },
         pricing: model?.pricing || null,
     };

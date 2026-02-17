@@ -184,7 +184,8 @@
                         </svg></button>
                     <div class="header-model-dropdown" id="headerModelDropdown" onclick="event.stopPropagation()"></div>
                 </div>
-                <div id="modelStaleIndicator" class="model-stale-indicator" style="display:none;">Model list may be stale</div>
+                <div id="modelStaleIndicator" class="model-stale-indicator" style="display:none;">Model list may be
+                    stale</div>
                 <div class="header-spacer"></div>
                 <button class="temp-chat-btn" id="tempChatBtn" onclick="toggleTempChat()" title="Temporary chat">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" aria-hidden="true"
@@ -232,6 +233,22 @@
                         </button>
                         <button id="imageModeBtn" class="image-mode-btn" style="display:none"
                             onclick="toggleImageGenerationMode()" title="Generate images with this model">Image</button>
+                        <button id="searchToggle" class="search-mode-toggle" onclick="toggleSearchMode()"
+                            title="Search the web for up-to-date answers">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="search-pill-icon">
+                                <circle cx="11" cy="11" r="8" />
+                                <path d="M21 21l-4.35-4.35" />
+                            </svg>
+                            <span class="search-pill-label">Search</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="search-pill-close"
+                                onclick="event.stopPropagation(); toggleSearchMode()">
+                                <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                        </button>
                         <button id="canvasToggle" class="canvas-mode-toggle" onclick="toggleCanvasMode()"
                             title="Enable canvas mode — AI can edit code directly">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" aria-hidden="true"
@@ -348,8 +365,10 @@
                             <div class="canvas-console-empty">Click <strong>Run</strong> to execute the code</div>
                         </div>
                         <div class="canvas-console-input-row">
-                            <textarea id="canvasConsoleInput" class="canvas-console-input" placeholder="Standard input (stdin). One line per input." rows="2"></textarea>
-                            <button id="canvasConsoleRunInputBtn" class="canvas-console-run-input-btn">Run with input</button>
+                            <textarea id="canvasConsoleInput" class="canvas-console-input"
+                                placeholder="Standard input (stdin). One line per input." rows="2"></textarea>
+                            <button id="canvasConsoleRunInputBtn" class="canvas-console-run-input-btn">Run with
+                                input</button>
                         </div>
                     </div>
                 </div>
@@ -366,4 +385,3 @@
 </body>
 
 </html>
-
