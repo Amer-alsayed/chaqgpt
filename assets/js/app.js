@@ -6,7 +6,7 @@ const API_IMAGE_URL = '/api/image';
 let conversationHistory = [];
 let isProcessing = false;
 let messagesContainer = null;
-let currentModel = 'qwen/qwen3-vl-30b-a3b:free'; // Default: Qwen3 VL 30B A3B Thinking
+let currentModel = 'openrouter/aurora-alpha'; // Default: Aurora Alpha
 let currentChatId = null;
 let chatHistoryData = {};
 let abortController = null;
@@ -114,7 +114,7 @@ function getCurrentModelData() {
 
 function pickPreferredSupportedModel() {
     if (!availableModels || availableModels.length === 0) return null;
-    const preferred = availableModels.find((model) => model.id === 'qwen/qwen3-vl-30b-a3b:free');
+    const preferred = availableModels.find((model) => model.id === 'openrouter/aurora-alpha');
     if (preferred) return preferred;
     const textCapable = availableModels.find((model) => model?.capabilities?.textChat !== false);
     return textCapable || availableModels[0];
