@@ -14,12 +14,14 @@ app.use(express.json({ limit: '50mb' }));
 // Serve static files from the current directory
 app.use(express.static(path.join(__dirname, '.')));
 
-// Import the API handler
+// Import the API handlers
 const chatHandler = require('./api/chat');
 const modelsHandler = require('./api/models');
 const executeHandler = require('./api/execute');
 const latexHandler = require('./api/latex');
 const imageHandler = require('./api/image');
+const searchHandler = require('./api/search');
+const fetchUrlHandler = require('./api/fetch-url');
 
 // Mount the API handler
 app.get('/api/models', async (req, res) => {
@@ -71,6 +73,28 @@ app.post('/api/image', async (req, res) => {
     await imageHandler(req, res);
   } catch (error) {
     console.error('Error in /api/image handler:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
+
+app.post('/api/search', async (req, res) => {
+  try {
+    await searchHandler(req, res);
+  } catch (error) {
+    console.error('Error in /api/search handler:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
+
+app.post('/api/fetch-url', async (req, res) => {
+  try {
+    await fetchUrlHandler(req, res);
+  } catch (error) {
+    console.error('Error in /api/fetch-url handler:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal Server Error' });
     }

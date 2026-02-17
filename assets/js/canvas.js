@@ -70,6 +70,11 @@ class CanvasManager {
         this._latexPdfPreviewUrl = null;
         this._lastLatexCompile = null;
         this._latexRunId = 0;
+        this.lastPanelWidthPx = null;
+        this.panelMinWidthPx = 320;
+        this.panelMaxWidthRatio = 0.95;
+        this._widthStorageKey = 'canvasPanelWidth';
+        this._restorePanelWidth();
         // Init resize after DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
@@ -96,6 +101,73 @@ class CanvasManager {
 
     _isMobileViewport() {
         return window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    }
+
+    _restorePanelWidth() {
+        try {
+            const raw = localStorage.getItem(this._widthStorageKey);
+            const value = Number(raw);
+            if (Number.isFinite(value) && value >= this.panelMinWidthPx) {
+                this.lastPanelWidthPx = value;
+            }
+        } catch { }
+    }
+
+    _persistPanelWidth(widthPx) {
+        if (!Number.isFinite(widthPx)) return;
+        this.lastPanelWidthPx = Math.max(this.panelMinWidthPx, Math.round(widthPx));
+        try {
+            localStorage.setItem(this._widthStorageKey, String(this.lastPanelWidthPx));
+        } catch { }
+    }
+
+    _getPanelWidthBounds() {
+        const maxByViewport = Math.floor(window.innerWidth * this.panelMaxWidthRatio);
+        const min = this.panelMinWidthPx;
+        const max = Math.max(min, maxByViewport);
+        return { min, max };
+    }
+
+    _applySavedPanelWidth(panel) {
+        if (!panel || this.isFullscreen || this._isMobileViewport()) return;
+        if (!Number.isFinite(this.lastPanelWidthPx)) return;
+        const { min, max } = this._getPanelWidthBounds();
+        const width = Math.max(min, Math.min(this.lastPanelWidthPx, max));
+        panel.style.width = `${width}px`;
+    }
+
+    _setCodeHighlight(code, lang, highlightEl) {
+        if (!highlightEl) return;
+        const value = String(code || '');
+        const normalized = String(lang || '').toLowerCase().trim();
+        const langMap = {
+            js: 'javascript',
+            ts: 'typescript',
+            py: 'python',
+            csharp: 'cs',
+            'c#': 'cs',
+            shell: 'bash'
+        };
+        const highlightLang = langMap[normalized] || normalized;
+
+        let highlighted = this._escapeHtml(value);
+        if (window.hljs && typeof window.hljs.highlight === 'function') {
+            try {
+                highlighted = highlightLang
+                    ? window.hljs.highlight(value, { language: highlightLang }).value
+                    : window.hljs.highlightAuto(value).value;
+            } catch {
+                try {
+                    highlighted = window.hljs.highlightAuto(value).value;
+                } catch {
+                    highlighted = this._escapeHtml(value);
+                }
+            }
+        }
+
+        // Keep trailing newline visible/aligned with textarea and gutter.
+        if (value.endsWith('\n')) highlighted += '\n';
+        highlightEl.innerHTML = highlighted;
     }
 
     getConfig(lang) {
@@ -150,6 +222,7 @@ class CanvasManager {
         // Show panel
         panel.classList.add('open');
         appContainer.classList.add('canvas-open');
+        this._applySavedPanelWidth(panel);
         this.isOpen = true;
 
         // Update run button text
@@ -159,6 +232,7 @@ class CanvasManager {
     close() {
         const panel = document.getElementById('canvasPanel');
         const appContainer = document.querySelector('.app-container');
+        const wasFullscreen = this.isFullscreen;
 
         // Restore sidebar & rail if we were in fullscreen
         if (this.isFullscreen) {
@@ -177,7 +251,9 @@ class CanvasManager {
         this.isOpen = false;
         this.isFullscreen = false;
 
-        // Reset custom width
+        if (!wasFullscreen && Number.isFinite(panel.offsetWidth)) {
+            this._persistPanelWidth(panel.offsetWidth);
+        }
         panel.style.width = '';
 
         // Reset fullscreen icons
@@ -202,10 +278,20 @@ class CanvasManager {
         const appContainer = document.querySelector('.app-container');
         const sidebar = document.querySelector('.sidebar');
         const sidebarRail = document.getElementById('sidebarRail');
+        if (!panel || !appContainer) return;
+
+        const wasFullscreen = this.isFullscreen;
         this.isFullscreen = !this.isFullscreen;
 
+        // Capture current width before entering fullscreen so exit can restore it.
+        if (!wasFullscreen) {
+            this._persistPanelWidth(panel.offsetWidth);
+        }
+
+        panel.classList.add('animating');
         panel.classList.toggle('fullscreen', this.isFullscreen);
         appContainer.classList.toggle('canvas-fullscreen', this.isFullscreen);
+        window.setTimeout(() => panel.classList.remove('animating'), 260);
 
         // Hide sidebar and rail in fullscreen, restore on exit
         if (sidebar) {
@@ -226,9 +312,11 @@ class CanvasManager {
         if (expandIcon) expandIcon.style.display = this.isFullscreen ? 'none' : '';
         if (shrinkIcon) shrinkIcon.style.display = this.isFullscreen ? '' : 'none';
 
-        // Reset any custom drag width when going fullscreen
+        // Reset inline width in fullscreen and restore saved width when exiting.
         if (this.isFullscreen) {
             panel.style.width = '';
+        } else {
+            this._applySavedPanelWidth(panel);
         }
     }
 
@@ -250,7 +338,8 @@ class CanvasManager {
 
         const onMouseMove = (e) => {
             const delta = startX - e.clientX;
-            const newWidth = Math.max(300, Math.min(startWidth + delta, window.innerWidth * 0.9));
+            const { min, max } = this._getPanelWidthBounds();
+            const newWidth = Math.max(min, Math.min(startWidth + delta, max));
             panel.style.width = newWidth + 'px';
             // Disable transition during drag for instant feedback
             panel.style.transition = 'none';
@@ -262,6 +351,7 @@ class CanvasManager {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             panel.style.transition = '';
+            this._persistPanelWidth(panel.offsetWidth);
             // Also update iframe if in preview mode
             const iframe = panel.querySelector('.canvas-preview-iframe');
             if (iframe) iframe.style.pointerEvents = '';
@@ -977,11 +1067,20 @@ class CanvasManager {
 
         container.innerHTML = `
             <div class="canvas-code-lines" id="canvasCodeLines">${lineNumbers}</div>
-            <textarea class="canvas-code-editor" id="canvasCodeEditor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">${this._escapeHtml(code)}</textarea>
+            <div class="canvas-code-editor-wrap" id="canvasCodeEditorWrap">
+                <pre class="canvas-code-highlight"><code id="canvasCodeHighlight"></code></pre>
+                <textarea class="canvas-code-editor" id="canvasCodeEditor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">${this._escapeHtml(code)}</textarea>
+            </div>
         `;
 
         const editor = container.querySelector('#canvasCodeEditor');
         const linesEl = container.querySelector('#canvasCodeLines');
+        const highlightEl = container.querySelector('#canvasCodeHighlight');
+        const highlightPreEl = highlightEl ? highlightEl.closest('.canvas-code-highlight') : null;
+        this._setCodeHighlight(code, lang, highlightEl);
+        editor.scrollTop = 0;
+        editor.scrollLeft = 0;
+        if (highlightPreEl) highlightPreEl.style.transform = 'translate(0px, 0px)';
 
         // Sync code changes back to manager
         editor.addEventListener('input', () => {
@@ -989,11 +1088,15 @@ class CanvasManager {
             // Update line numbers
             const newLines = editor.value.split('\n');
             linesEl.innerHTML = newLines.map((_, i) => `<span class="line-num">${i + 1}</span>`).join('');
+            this._setCodeHighlight(editor.value, lang, highlightEl);
         });
 
-        // Sync scroll between editor and line numbers
+        // Sync scroll between editor, gutter, and highlight layer.
         editor.addEventListener('scroll', () => {
             linesEl.scrollTop = editor.scrollTop;
+            if (highlightPreEl) {
+                highlightPreEl.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+            }
         });
 
         // Handle Tab key for indentation
@@ -1005,6 +1108,9 @@ class CanvasManager {
                 editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
                 editor.selectionStart = editor.selectionEnd = start + 4;
                 this.currentCode = editor.value;
+                const newLines = editor.value.split('\n');
+                linesEl.innerHTML = newLines.map((_, i) => `<span class="line-num">${i + 1}</span>`).join('');
+                this._setCodeHighlight(editor.value, lang, highlightEl);
             }
         });
     }
