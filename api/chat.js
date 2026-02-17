@@ -159,6 +159,24 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
     return failoverResult;
 }
 
+function flattenUserContent(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+        .filter((p) => p?.type === 'text')
+        .map((p) => String(p.text || ''))
+        .join(' ');
+}
+
+function isEvidenceSensitiveQuery(text) {
+    return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm|model comparison)\b/i
+        .test(String(text || ''));
+}
+
+function hasNumericClaims(text) {
+    return /\b\d+([.,]\d+)?\b/.test(String(text || ''));
+}
+
 async function forceTextCompletion(request, model, messages, options = {}) {
     const result = await runOpenRouterCompletion(request, model, messages, {
         stream: false,
@@ -210,6 +228,9 @@ async function agenticLoop(request, model, messages) {
         high_trust_sources_count: 0,
     };
 
+    const userQuestion = flattenUserContent(getLastUserMessageContent(messages));
+    const strictEvidenceRequired = isEvidenceSensitiveQuery(userQuestion);
+
     let currentMessages = [
         {
             role: 'system',
@@ -217,7 +238,8 @@ async function agenticLoop(request, model, messages) {
                 `You are an evidence-first assistant with access to web tools. Today's date is ${today}.\n` +
                 `Tool limits are strict: max ${MAX_TOOL_CALLS_TOTAL} total calls, and per-tool limits apply.\n` +
                 `Prioritize high-trust and recent sources, cite URLs inline as [Title](URL), and clearly flag uncertainty when evidence is weak.\n` +
-                `Use execute_code only when computation materially increases correctness.`,
+                `Use execute_code only when computation materially increases correctness.\n` +
+                `For fast-changing topics (benchmarks, rankings, prices, releases), do not provide exact numbers without source-backed citations.`,
         },
         ...messages,
     ];
@@ -256,9 +278,25 @@ async function agenticLoop(request, model, messages) {
         if (toolCalls.length === 0) {
             const answer = ensureCitationGuard(String(message.content || '').trim(), [...sourceMap.values()]);
             if (answer) {
+                const coverage = citationCoverageRatio(answer, [...sourceMap.values()]);
+                const weakEvidenceForNumeric =
+                    strictEvidenceRequired &&
+                    hasNumericClaims(answer) &&
+                    coverage < 0.25;
+
+                if (weakEvidenceForNumeric && round < (MAX_TOOL_ROUNDS - 1)) {
+                    currentMessages.push({
+                        role: 'system',
+                        content:
+                            'Your previous answer had numeric claims with weak citations. ' +
+                            'Run another search using current-year keywords, read at least one primary source with fetch_url, then answer with citations.',
+                    });
+                    continue;
+                }
+
                 metrics.sources_count = sourceMap.size;
                 metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
-                metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
+                metrics.citation_coverage_ratio = coverage;
                 structuredMetricLog(metrics);
                 return { ok: true, answer, sources: [...sourceMap.values()], metrics };
             }
@@ -357,11 +395,21 @@ async function agenticLoop(request, model, messages) {
     const forcedAnswerRaw = await forceTextCompletion(request, model, forcedMessages, { maxTokens: 3072 });
     if (forcedAnswerRaw) {
         const answer = ensureCitationGuard(forcedAnswerRaw, [...sourceMap.values()]);
-        metrics.sources_count = sourceMap.size;
-        metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
-        metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
-        structuredMetricLog(metrics);
-        return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        const coverage = citationCoverageRatio(answer, [...sourceMap.values()]);
+        const weakEvidenceForNumeric =
+            strictEvidenceRequired &&
+            hasNumericClaims(answer) &&
+            coverage < 0.25;
+
+        if (!weakEvidenceForNumeric) {
+            metrics.sources_count = sourceMap.size;
+            metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
+            metrics.citation_coverage_ratio = coverage;
+            structuredMetricLog(metrics);
+            return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        }
+
+        metrics.tool_error_count += 1;
     }
 
     const lastUserContent = getLastUserMessageContent(messages);

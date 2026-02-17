@@ -113,6 +113,19 @@ function shouldUseBingRss(query) {
     return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(String(query || ''));
 }
 
+function isRecencySensitiveQuery(query) {
+    return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm)\b/i
+        .test(String(query || ''));
+}
+
+function ensureRecencyHint(query) {
+    const q = String(query || '').trim();
+    if (!q) return q;
+    if (/\b(19|20)\d{2}\b/.test(q)) return q;
+    if (!isRecencySensitiveQuery(q)) return q;
+    return `${q} ${new Date().getFullYear()}`;
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -233,6 +246,11 @@ function extractYearSignals(text) {
 
 function inferPublishedDate(result) {
     if (result.publishedAt) return result.publishedAt;
+    const urlYear = String(result.url || '').match(/(?:19|20)\d{2}/g);
+    if (urlYear && urlYear.length > 0) {
+        const latestFromUrl = Math.max(...urlYear.map((y) => Number(y)).filter(Number.isFinite));
+        if (latestFromUrl >= 1990 && latestFromUrl <= 2100) return `${latestFromUrl}-01-01`;
+    }
     const years = extractYearSignals(`${result.title} ${result.snippet}`);
     if (years.length === 0) return null;
     const latest = Math.max(...years);
@@ -240,9 +258,11 @@ function inferPublishedDate(result) {
     return `${latest}-01-01`;
 }
 
-function freshnessScore(result, recencyDays) {
+function freshnessScore(result, recencyDays, query = '') {
     const publishedAt = inferPublishedDate(result);
-    if (!publishedAt) return 0.35;
+    if (!publishedAt) {
+        return isRecencySensitiveQuery(query) ? 0.15 : 0.35;
+    }
     const date = Date.parse(publishedAt);
     if (!Number.isFinite(date)) return 0.35;
     const days = Math.max(0, (Date.now() - date) / (24 * 60 * 60 * 1000));
@@ -545,6 +565,7 @@ function dedupeAndScore(rawResults, options) {
     } = options || {};
 
     const highStakes = isHighStakesQuery(query);
+    const recencySensitive = isRecencySensitiveQuery(query);
     const seen = new Map();
     const agreementMap = new Map();
 
@@ -569,10 +590,19 @@ function dedupeAndScore(rawResults, options) {
         }
 
         const domainTrust = trustScore(result, trustedDomains, highStakes);
-        const freshness = freshnessScore(result, recencyDays);
+        const freshness = freshnessScore(result, recencyDays, query);
         const specificity = specificityScore(result);
         const providerWeight = PROVIDER_WEIGHTS[result.sourceEngine] || 0.1;
         const agreement = Math.min(1, ((agreementMap.get(result.url)?.size || 1) - 1) * 0.3);
+        const publishedAt = inferPublishedDate(result);
+        const publishedYear = publishedAt ? Number(String(publishedAt).slice(0, 4)) : null;
+
+        if (recencySensitive && publishedYear && Number.isFinite(publishedYear)) {
+            const cutoff = new Date().getFullYear() - 3;
+            if (publishedYear < cutoff) {
+                continue;
+            }
+        }
 
         const score =
             (domainTrust * 0.45) +
@@ -633,11 +663,14 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         MAX_RESULTS_LIMIT,
     );
     const locale = String(options.locale || DEFAULT_LOCALE);
-    const recencyDays = Math.max(1, Number(options.recencyDays) || DEFAULT_RECENCY_DAYS);
+    const baseRecencyDays = Math.max(1, Number(options.recencyDays) || DEFAULT_RECENCY_DAYS);
     const trustedDomains = normalizeDomainList(options.trustedDomains);
     const excludeDomains = normalizeDomainList(options.excludeDomains);
 
-    const searchQuery = sanitizeSearchQuery(query);
+    const searchQuery = ensureRecencyHint(sanitizeSearchQuery(query));
+    const recencyDays = isRecencySensitiveQuery(searchQuery)
+        ? Math.min(baseRecencyDays, 21)
+        : baseRecencyDays;
     const cacheKey = makeCacheKey(searchQuery, {
         maxResults,
         locale,
