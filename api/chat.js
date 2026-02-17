@@ -177,6 +177,16 @@ function hasNumericClaims(text) {
     return /\b\d+([.,]\d+)?\b/.test(String(text || ''));
 }
 
+function isSimpleFactQuery(text) {
+    const q = String(text || '').trim().toLowerCase();
+    if (!q || q.length > 120) return false;
+    if (/^(who is|what is|when is|where is|who was|what was)\b/.test(q) && q.split(/\s+/).length <= 12) {
+        return true;
+    }
+    if (/\bpresident of the (us|usa|united states)\b/.test(q)) return true;
+    return false;
+}
+
 async function forceTextCompletion(request, model, messages, options = {}) {
     const result = await runOpenRouterCompletion(request, model, messages, {
         stream: false,
@@ -214,7 +224,7 @@ function structuredMetricLog(data) {
     console.log(`[AgenticMetrics] ${JSON.stringify(data)}`);
 }
 
-async function agenticLoop(request, model, messages) {
+async function agenticLoop(request, model, messages, { onProgress } = {}) {
     const today = new Date().toISOString().split('T')[0];
     const deadline = Date.now() + MAX_AGENT_WALL_TIME_MS;
     let totalToolCalls = 0;
@@ -230,6 +240,9 @@ async function agenticLoop(request, model, messages) {
 
     const userQuestion = flattenUserContent(getLastUserMessageContent(messages));
     const strictEvidenceRequired = isEvidenceSensitiveQuery(userQuestion);
+    const report = (payload) => {
+        if (typeof onProgress === 'function') onProgress(payload);
+    };
 
     let currentMessages = [
         {
@@ -245,6 +258,7 @@ async function agenticLoop(request, model, messages) {
     ];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        report({ phase: 'round', message: `Agent round ${round + 1}/${MAX_TOOL_ROUNDS}` });
         if (Date.now() > deadline) {
             metrics.tool_error_count += 1;
             break;
@@ -308,6 +322,7 @@ async function agenticLoop(request, model, messages) {
         for (const toolCall of toolCalls) {
             const toolName = toolCall.function?.name;
             const toolArgs = toolCall.function?.arguments;
+            report({ phase: 'tool_start', tool: toolName, message: `Running ${toolName}...` });
 
             const existing = perToolCalls.get(toolName) || 0;
             const cap = MAX_TOOL_CALLS_PER_TOOL[toolName] || 1;
@@ -379,6 +394,7 @@ async function agenticLoop(request, model, messages) {
                 tool_call_id: toolCall.id,
                 content: toolResultText,
             });
+            report({ phase: 'tool_done', tool: toolName, message: `${toolName} completed` });
         }
     }
 
@@ -477,20 +493,40 @@ module.exports = async function handler(request, response) {
 
         if (searchEnabled) {
             const supportsTools = Boolean(modelInfo.capabilities.toolUse);
-            if (supportsTools) {
-                const result = await agenticLoop(request, model, messages);
+            const lastUserContent = getLastUserMessageContent(messages);
+            const userQuestion = flattenUserContent(lastUserContent);
+            const quickPath = isSimpleFactQuery(userQuestion);
+            const searchStartTs = Date.now();
+            const emitProgress = (payload = {}) => {
+                sendSSEEvent(response, 'search_status', {
+                    elapsedMs: Date.now() - searchStartTs,
+                    ...payload,
+                });
+            };
+
+            startSSEStream(response);
+            emitProgress({
+                phase: 'start',
+                message: quickPath ? 'Starting quick search path...' : 'Starting agentic search...',
+            });
+
+            if (supportsTools && !quickPath) {
+                const result = await agenticLoop(request, model, messages, {
+                    onProgress: emitProgress,
+                });
                 if (result.ok) {
-                    startSSEStream(response);
                     if (result.sources?.length > 0) {
                         sendSSEEvent(response, 'sources', result.sources);
                     }
                     sendSSEEvent(response, 'quality_metrics', result.metrics || {});
+                    emitProgress({ phase: 'complete', message: 'Search complete' });
                     streamTextAsSSE(response, result.answer);
                     return;
                 }
+                emitProgress({ phase: 'fallback', message: 'Falling back to context mode...' });
             }
 
-            const lastUserContent = getLastUserMessageContent(messages);
+            emitProgress({ phase: 'searching', message: 'Building search context...' });
             const searchResult = await buildSearchContext(lastUserContent);
 
             let enhancedMessages = [...messages];
@@ -500,10 +536,10 @@ module.exports = async function handler(request, response) {
                 searchSources = searchResult.sources || [];
             }
 
+            emitProgress({ phase: 'model', message: 'Generating final answer...' });
             const failoverResult = await runOpenRouterCompletion(request, model, enhancedMessages, { stream: true });
             if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
 
-            startSSEStream(response);
             if (searchSources.length > 0) sendSSEEvent(response, 'sources', searchSources);
             await pipeStream(failoverResult.response.body, response);
             return;
@@ -523,6 +559,19 @@ module.exports = async function handler(request, response) {
 };
 
 function handleFailoverError(response, failoverResult) {
+    if (response.headersSent) {
+        const message = failoverResult.lastFailure?.errorText
+            ? String(failoverResult.lastFailure.errorText).slice(0, 500)
+            : 'All upstream keys failed.';
+        sendSSEEvent(response, 'search_status', {
+            phase: 'error',
+            message,
+        });
+        response.write('data: [DONE]\n\n');
+        response.end();
+        return;
+    }
+
     if (failoverResult.lastFailure?.type === 'config') {
         return response.status(500).json({ error: 'API key not configured.' });
     }

@@ -19,6 +19,7 @@ let searchEnabled = localStorage.getItem('searchEnabled') === 'true'; // Web sea
 let availableModels = [...models]; // Initialize with config models
 let pendingImages = []; // base64 data URLs for image attachments
 let pendingFiles = []; // PDF attachments as data URLs
+let realtimeSearchStatusText = '';
 let imageGenerationMode = false;
 let modelsMeta = null;
 let activeStreamContext = { searchEnabledAtRequest: false, canvasModeAtRequest: false };
@@ -155,6 +156,23 @@ function updateHeaderModelDisplay() {
     }
 }
 
+function setSearchRealtimeStatus(text) {
+    realtimeSearchStatusText = String(text || '').trim();
+    const el = document.getElementById('searchRealtimeStatus');
+    if (!el) return;
+    if (!realtimeSearchStatusText) {
+        el.textContent = '';
+        el.style.display = 'none';
+        return;
+    }
+    el.textContent = realtimeSearchStatusText;
+    el.style.display = '';
+}
+
+function clearSearchRealtimeStatus() {
+    setSearchRealtimeStatus('');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadTheme();
     loadUsername();
@@ -184,6 +202,14 @@ document.addEventListener('DOMContentLoaded', () => {
     preventBodyScroll();
     setupMobileKeyboard();
     updateSendButtonState();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('newChat') === '1') {
+        window.newChat();
+        params.delete('newChat');
+        const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, '', nextUrl);
+    }
 });
 
 function setupMobileKeyboard() {
@@ -691,6 +717,7 @@ window.stopGeneration = function () {
     if (abortController) abortController.abort();
     removeTypingIndicator();
     cleanupStreamingUI();
+    clearSearchRealtimeStatus();
     isProcessing = false;
     updateSendButtonState();
 }
@@ -792,10 +819,19 @@ window.newChat = function () {
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     document.getElementById('scrollToBottom').classList.remove('show');
     if (window.innerWidth <= 768) window.closeSidebar();
+    clearSearchRealtimeStatus();
     // Reset temp chat state
     window.isTempChat = false;
     const tempBtn = document.getElementById('tempChatBtn');
     if (tempBtn) tempBtn.classList.remove('active');
+}
+
+window.handleNewChatAuxClick = function (event) {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    const url = new URL(window.location.href);
+    url.searchParams.set('newChat', '1');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
 }
 
 window.isTempChat = false;
@@ -822,6 +858,7 @@ window.toggleTempChat = function () {
         document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
         document.getElementById('scrollToBottom').classList.remove('show');
         if (window.innerWidth <= 768) window.closeSidebar();
+        clearSearchRealtimeStatus();
     } else {
         // Exiting temp chat â€” start a fresh regular chat
         conversationHistory = [];
@@ -835,6 +872,7 @@ window.toggleTempChat = function () {
         window.handleInput();
         document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
         document.getElementById('scrollToBottom').classList.remove('show');
+        clearSearchRealtimeStatus();
     }
 }
 
@@ -1408,6 +1446,11 @@ window.sendMessage = async function () {
     isProcessing = true;
     updateSendButtonState();
     showTypingIndicator();
+    if (searchEnabled) {
+        setSearchRealtimeStatus('Searching the web... 0.0s');
+    } else {
+        clearSearchRealtimeStatus();
+    }
 
     let assistantMessageContent = '';
     let messageGroup;
@@ -1486,6 +1529,7 @@ window.sendMessage = async function () {
         let reasoningContent = '';
         let fullAssistantContent = '';
         let searchSources = []; // Collected from SSE 'sources' event
+        let searchStatusPhase = '';
         let currentSSEEvent = ''; // Track custom SSE event types
 
         // --- Loop / repetition detection ---
@@ -1541,6 +1585,19 @@ window.sendMessage = async function () {
                         try {
                             const sources = JSON.parse(data);
                             if (Array.isArray(sources)) searchSources = sources;
+                        } catch { }
+                        currentSSEEvent = '';
+                        continue;
+                    }
+                    if (currentSSEEvent === 'search_status') {
+                        try {
+                            const status = JSON.parse(data);
+                            const elapsedSec = (Number(status?.elapsedMs || 0) / 1000).toFixed(1);
+                            const phase = status?.phase ? `[${status.phase}] ` : '';
+                            const tool = status?.tool ? ` (${status.tool})` : '';
+                            const msg = status?.message || 'Searching...';
+                            searchStatusPhase = String(status?.phase || '');
+                            setSearchRealtimeStatus(`${phase}${msg}${tool} • ${elapsedSec}s`);
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1680,6 +1737,12 @@ window.sendMessage = async function () {
             renderChatHistory();
         }
 
+        if (searchStatusPhase === 'error') {
+            setSearchRealtimeStatus('Search failed. Please retry.');
+        } else {
+            clearSearchRealtimeStatus();
+        }
+
         // Show loop detection warning if triggered
         if (loopDetected && messageGroup) {
             const warningEl = document.createElement('div');
@@ -1698,6 +1761,7 @@ window.sendMessage = async function () {
 
     } catch (error) {
         removeTypingIndicator();
+        clearSearchRealtimeStatus();
         if (error.name !== 'AbortError') {
             showToast('Error: ' + error.message, 'error');
             console.error('Error:', error);
@@ -1711,6 +1775,9 @@ window.sendMessage = async function () {
         shouldStopTyping = false;
         updateSendButtonState();
         abortController = null;
+        if (!realtimeSearchStatusText.toLowerCase().includes('failed')) {
+            clearSearchRealtimeStatus();
+        }
     }
 }
 
