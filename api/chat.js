@@ -2,8 +2,8 @@ const { getModelById } = require('./lib/openrouter-models');
 const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
 const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('./lib/tools');
 
-const MAX_TOOL_ROUNDS = 6;
-const MAX_TOOL_CALLS_TOTAL = 6;
+const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_CALLS_TOTAL = 4;
 const MAX_TOOL_CALLS_PER_TOOL = {
     search_web: 4,
     fetch_url: 3,
@@ -11,7 +11,7 @@ const MAX_TOOL_CALLS_PER_TOOL = {
     execute_code: 2,
     get_current_datetime: 1,
 };
-const MAX_AGENT_WALL_TIME_MS = 25_000;
+const MAX_AGENT_WALL_TIME_MS = 18_000;
 
 async function pipeStream(readable, writable) {
     const reader = readable.getReader();
