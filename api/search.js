@@ -12,6 +12,7 @@ const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
 const DDG_LITE_URL = 'https://lite.duckduckgo.com/lite/';
 const DDG_API_URL = 'https://api.duckduckgo.com/';
 const WIKI_API_URL = 'https://en.wikipedia.org/w/api.php';
+const BING_RSS_URL = 'https://www.bing.com/search';
 
 const DEFAULT_LOCALE = 'en-US';
 const DEFAULT_RECENCY_DAYS = 30;
@@ -44,6 +45,7 @@ const PROVIDER_WEIGHTS = {
     ddg_lite: 0.2,
     ddg_instant: 0.15,
     wikipedia: 0.15,
+    bing_rss: 0.2,
 };
 
 const BROWSER_HEADERS = {
@@ -195,7 +197,8 @@ function trustScore(result, trustedDomains = [], highStakes = false) {
     const domain = result.domain || getDomainFromUrl(result.url);
     if (!domain) return 0.2;
     if (trustedDomains.includes(domain)) return 1;
-    if (HIGH_TRUST_DOMAINS.has(domain)) return 0.95;
+    if (domain === 'wikipedia.org') return 0.78;
+    if (HIGH_TRUST_DOMAINS.has(domain)) return 0.92;
     if (domain.endsWith('.gov') || domain.endsWith('.edu')) return 0.9;
     if (domain.endsWith('.org')) return highStakes ? 0.7 : 0.75;
     if (domain.endsWith('.com')) return highStakes ? 0.45 : 0.55;
@@ -299,20 +302,43 @@ async function searchDDGInstantProvider(query, maxResults) {
         if (!response.ok) throw new Error(`DDG API status ${response.status}`);
         const data = await response.json();
         const results = [];
+        const queryTokens = new Set(String(query || '').toLowerCase().split(/\W+/).filter((t) => t.length >= 3));
+        const isRelevant = (text) => {
+            const tokens = String(text || '').toLowerCase().split(/\W+/).filter((t) => t.length >= 3);
+            if (tokens.length === 0 || queryTokens.size === 0) return true;
+            let overlap = 0;
+            for (const token of tokens) {
+                if (queryTokens.has(token)) overlap += 1;
+            }
+            return overlap >= 1;
+        };
+        const isExternalHttp = (value) => {
+            try {
+                const u = new URL(String(value || ''));
+                const hostname = String(u.hostname || '').toLowerCase();
+                if (!['http:', 'https:'].includes(u.protocol)) return false;
+                if (hostname.endsWith('duckduckgo.com')) return false;
+                return true;
+            } catch {
+                return false;
+            }
+        };
 
         if (data.AbstractText && data.AbstractURL) {
-            results.push({
-                title: data.Heading || query,
-                url: data.AbstractURL,
-                snippet: String(data.AbstractText || '').slice(0, 280),
-                sourceEngine: 'ddg_instant',
-            });
+            if (isExternalHttp(data.AbstractURL) && isRelevant(`${data.Heading} ${data.AbstractText}`)) {
+                results.push({
+                    title: data.Heading || query,
+                    url: data.AbstractURL,
+                    snippet: String(data.AbstractText || '').slice(0, 280),
+                    sourceEngine: 'ddg_instant',
+                });
+            }
         }
 
         const topics = Array.isArray(data.RelatedTopics) ? data.RelatedTopics : [];
         for (const topic of topics) {
             if (results.length >= maxResults) break;
-            if (topic?.FirstURL && topic?.Text) {
+            if (topic?.FirstURL && topic?.Text && isExternalHttp(topic.FirstURL) && isRelevant(topic.Text)) {
                 results.push({
                     title: String(topic.Text).split(' - ')[0]?.trim() || String(topic.Text).slice(0, 80),
                     url: topic.FirstURL,
@@ -322,7 +348,7 @@ async function searchDDGInstantProvider(query, maxResults) {
             } else if (Array.isArray(topic?.Topics)) {
                 for (const nested of topic.Topics) {
                     if (results.length >= maxResults) break;
-                    if (nested?.FirstURL && nested?.Text) {
+                    if (nested?.FirstURL && nested?.Text && isExternalHttp(nested.FirstURL) && isRelevant(nested.Text)) {
                         results.push({
                             title: String(nested.Text).split(' - ')[0]?.trim() || String(nested.Text).slice(0, 80),
                             url: nested.FirstURL,
@@ -358,8 +384,42 @@ async function searchWikipediaProvider(query, maxResults) {
             url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(item.title).replace(/ /g, '_'))}`,
             snippet: cleanWhitespace(stripHTMLTags(item.snippet || '')),
             sourceEngine: 'wikipedia',
-            publishedAt: item.timestamp || null,
+            // Wikipedia timestamp is last-edit, not publication time.
+            publishedAt: null,
         }));
+    });
+}
+
+function parseRssItems(xml) {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+    while ((match = itemRegex.exec(String(xml || '')))) {
+        const block = match[1];
+        const title = cleanWhitespace(decodeHTMLEntities((block.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || ''));
+        const link = cleanWhitespace(decodeHTMLEntities((block.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || ''));
+        const desc = cleanWhitespace(decodeHTMLEntities(stripHTMLTags((block.match(/<description>([\s\S]*?)<\/description>/i) || [])[1] || '')));
+        if (!/^https?:\/\//i.test(link)) continue;
+        items.push({
+            title: title || link,
+            url: link,
+            snippet: desc,
+            sourceEngine: 'bing_rss',
+        });
+    }
+    return items;
+}
+
+async function searchBingRssProvider(query, maxResults) {
+    return withRetries(async () => {
+        const params = new URLSearchParams({ q: query, format: 'rss' });
+        const response = await fetchWithTimeout(`${BING_RSS_URL}?${params.toString()}`, {
+            method: 'GET',
+            headers: BROWSER_HEADERS,
+        }, PROVIDER_TIMEOUT_MS);
+        if (!response.ok) throw new Error(`Bing RSS status ${response.status}`);
+        const xml = await response.text();
+        return parseRssItems(xml).slice(0, maxResults);
     });
 }
 
@@ -427,7 +487,24 @@ function dedupeAndScore(rawResults, options) {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored;
+
+    const maxPerDomain = 2;
+    const domainCount = new Map();
+    const diversified = [];
+    const overflow = [];
+
+    for (const item of scored) {
+        const key = item.domain || 'unknown';
+        const count = domainCount.get(key) || 0;
+        if (count < maxPerDomain) {
+            domainCount.set(key, count + 1);
+            diversified.push(item);
+        } else {
+            overflow.push(item);
+        }
+    }
+
+    return [...diversified, ...overflow];
 }
 
 function normalizeDomainList(value) {
@@ -459,15 +536,32 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         const providers = [
             searchDDGHtmlProvider(query, maxResults * 2, locale),
             searchDDGLiteProvider(query, maxResults * 2),
-            searchDDGInstantProvider(query, maxResults),
-            searchWikipediaProvider(query, maxResults),
+            searchBingRssProvider(query, maxResults * 2),
+            searchDDGInstantProvider(query, Math.max(2, Math.ceil(maxResults / 2))),
+            searchWikipediaProvider(query, Math.max(2, Math.ceil(maxResults / 2))),
         ];
 
         const settled = await Promise.allSettled(providers);
         const raw = [];
+        const providerSummary = {
+            ddg_html: 0,
+            ddg_lite: 0,
+            bing_rss: 0,
+            ddg_instant: 0,
+            wikipedia: 0,
+            failed: 0,
+        };
         for (const result of settled) {
             if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                raw.push(...result.value.map(normalizeResult));
+                for (const item of result.value) {
+                    const normalized = normalizeResult(item);
+                    raw.push(normalized);
+                    if (providerSummary[normalized.sourceEngine] !== undefined) {
+                        providerSummary[normalized.sourceEngine] += 1;
+                    }
+                }
+            } else if (result.status === 'rejected') {
+                providerSummary.failed += 1;
             }
         }
 
@@ -477,6 +571,7 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             excludeDomains,
             query,
         });
+        console.log(`[SearchProviders] ${JSON.stringify({ query, providerSummary, ranked: ranked.length })}`);
 
         return ranked.slice(0, maxResults);
     } finally {
@@ -538,4 +633,5 @@ module.exports.__test = {
     dedupeAndScore,
     parseDuckDuckGoHTML,
     parseDuckDuckGoLiteHTML,
+    parseRssItems,
 };
