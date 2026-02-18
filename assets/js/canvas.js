@@ -49,7 +49,9 @@ const LANGUAGE_CONFIG = {
     powershell: { label: 'PowerShell', icon: '💲', strategy: 'piston', color: '#012456', pistonLang: 'powershell' },
     // LaTeX — server-side compile for preview and PDF download
     latex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
+    excalidraw: { label: 'Excalidraw', icon: '🎨', strategy: 'excalidraw', color: '#6965db' },
     tex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
+    excalidraw: { label: 'Excalidraw', icon: '🎨', strategy: 'excalidraw', color: '#6965db' },
 };
 
 // ─── Pyodide State ───────────────────────────────────────────────
@@ -89,6 +91,9 @@ class CanvasManager {
 
     _setPreviewSandboxForStrategy(strategy) {
         const iframe = document.querySelector('.canvas-preview-iframe');
+        const exContainer = document.getElementById('canvasExcalidrawContainer');
+        if (exContainer) exContainer.style.display = 'none';
+        if (iframe) { iframe.style.display = ''; }
         if (!iframe) return;
 
         if (strategy === 'latex') {
@@ -205,6 +210,9 @@ class CanvasManager {
         } else if (config.strategy === 'latex') {
             this.switchTab('preview');
             this._runLatex(code);
+        } else if (config.strategy === 'excalidraw') {
+            this.switchTab('preview');
+            this._runExcalidraw(code);
         } else {
             this.switchTab('code');
         }
@@ -419,6 +427,10 @@ class CanvasManager {
                 case 'latex':
                     await this._runLatex(this.currentCode);
                     break;
+                case 'excalidraw':
+                    await this._runExcalidraw(this.currentCode);
+                    this.switchTab('preview');
+                    break;
                 default:
                     this._log('error', `Unsupported language: ${this.currentLang}`);
                     this.switchTab('console');
@@ -437,6 +449,9 @@ class CanvasManager {
 
     _runWeb(code, lang) {
         const iframe = document.querySelector('.canvas-preview-iframe');
+        const exContainer = document.getElementById('canvasExcalidrawContainer');
+        if (exContainer) exContainer.style.display = 'none';
+        if (iframe) { iframe.style.display = ''; }
         if (!iframe) return;
         this._setPreviewSandboxForStrategy('web');
 
@@ -516,6 +531,9 @@ class CanvasManager {
 
     _showLatexLoading() {
         const iframe = document.querySelector('.canvas-preview-iframe');
+        const exContainer = document.getElementById('canvasExcalidrawContainer');
+        if (exContainer) exContainer.style.display = 'none';
+        if (iframe) { iframe.style.display = ''; }
         if (!iframe) return;
 
         this._revokeLatexPreviewUrl();
@@ -550,6 +568,9 @@ class CanvasManager {
 
     _showLatexPdfPreview(objectUrl) {
         const iframe = document.querySelector('.canvas-preview-iframe');
+        const exContainer = document.getElementById('canvasExcalidrawContainer');
+        if (exContainer) exContainer.style.display = 'none';
+        if (iframe) { iframe.style.display = ''; }
         if (!iframe) return;
         this._setPreviewSandboxForStrategy('latex');
 
@@ -652,6 +673,9 @@ class CanvasManager {
 
     _showLatexPreviewError(message) {
         const iframe = document.querySelector('.canvas-preview-iframe');
+        const exContainer = document.getElementById('canvasExcalidrawContainer');
+        if (exContainer) exContainer.style.display = 'none';
+        if (iframe) { iframe.style.display = ''; }
         if (!iframe) return;
 
         this._revokeLatexPreviewUrl();

@@ -15,6 +15,15 @@
     <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <link rel="stylesheet" href="assets/css/style.css?v=20260215">
+    <script type="importmap">
+        {
+            "imports": {
+                "react": "https://esm.sh/react@18.2.0",
+                "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+                "@excalidraw/excalidraw": "https://esm.sh/@excalidraw/excalidraw@0.17.6?external=react,react-dom/client"
+            }
+        }
+    </script>
 </head>
 
 <body>
@@ -358,6 +367,7 @@
                     <iframe class="canvas-preview-iframe"
                         sandbox="allow-scripts allow-modals allow-forms allow-same-origin"
                         title="Code Preview"></iframe>
+                    <div id="canvasExcalidrawContainer" style="display:none; height: 100%; width: 100%;"></div>
                 </div>
                 <div class="canvas-tab-content" data-tab="console">
                     <div class="canvas-console-panel">
