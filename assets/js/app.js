@@ -24,7 +24,7 @@ let modelsMeta = null;
 let activeStreamContext = { searchEnabledAtRequest: false, canvasModeAtRequest: false };
 const SEND_BUTTON_SEND_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
 const SEND_BUTTON_STOP_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>`;
-const CANVAS_PREVIEW_LANGS = ['html', 'css', 'javascript', 'js', 'latex', 'tex'];
+const CANVAS_PREVIEW_LANGS = ['html', 'css', 'javascript', 'js', 'latex', 'tex', 'excalidraw'];
 const CANVAS_RUN_LANGS_SAFE = [
     'javascript', 'js', 'python', 'py', 'python3',
     'c', 'cpp', 'c++', 'java', 'go', 'golang', 'rust',
@@ -43,7 +43,7 @@ function buildCanvasSystemPrompt(canvasState) {
 4. If the user does NOT force a specific language, choose from the supported lists above.
 5. If the user explicitly forces a different language, follow the user request, but clearly warn that it may not run/preview in canvas.
 6. Never default to native GUI frameworks (for example pygame, tkinter, PyQt) for canvas output.
-7. Prefer HTML/CSS/JS for visual interactive previews.`;
+7. Prefer HTML/CSS/JS for visual interactive previews.\n8. To create diagrams, use ```excalidraw block with valid Excalidraw JSON.`;
 
     if (canvasState && canvasState.isOpen && canvasState.code) {
         return `You are in CANVAS MODE editing ${canvasState.langLabel} code.
