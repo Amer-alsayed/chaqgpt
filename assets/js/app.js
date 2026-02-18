@@ -43,7 +43,7 @@ function buildCanvasSystemPrompt(canvasState) {
 4. If the user does NOT force a specific language, choose from the supported lists above.
 5. If the user explicitly forces a different language, follow the user request, but clearly warn that it may not run/preview in canvas.
 6. Never default to native GUI frameworks (for example pygame, tkinter, PyQt) for canvas output.
-7. Prefer HTML/CSS/JS for visual interactive previews.\n8. To create diagrams, use ```excalidraw block with valid Excalidraw JSON.`;
+7. Prefer HTML/CSS/JS for visual interactive previews.\n8. To create diagrams, use \`\`\`excalidraw block with valid Excalidraw JSON.`;
 
     if (canvasState && canvasState.isOpen && canvasState.code) {
         return `You are in CANVAS MODE editing ${canvasState.langLabel} code.

@@ -49,8 +49,8 @@ const LANGUAGE_CONFIG = {
     powershell: { label: 'PowerShell', icon: '💲', strategy: 'piston', color: '#012456', pistonLang: 'powershell' },
     // LaTeX — server-side compile for preview and PDF download
     latex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
-    excalidraw: { label: 'Excalidraw', icon: '🎨', strategy: 'excalidraw', color: '#6965db' },
     tex: { label: 'LaTeX', icon: '📄', strategy: 'latex', color: '#008080' },
+    // Excalidraw
     excalidraw: { label: 'Excalidraw', icon: '🎨', strategy: 'excalidraw', color: '#6965db' },
 };
 
@@ -839,6 +839,47 @@ class CanvasManager {
         } finally {
             clearTimeout(timeoutId);
         }
+    }
+
+
+    async _runExcalidraw(code) {
+        const container = document.getElementById('canvasExcalidrawContainer');
+        const iframe = document.querySelector('.canvas-preview-iframe');
+        if (!container) return;
+
+        if (iframe) iframe.style.display = 'none';
+        container.style.display = 'block';
+        container.innerHTML = '';
+
+        this._log('info', 'Loading Excalidraw...');
+        this._renderConsole();
+
+        try {
+            const { default: React } = await import('react');
+            const { createRoot } = await import('react-dom/client');
+            const { Excalidraw } = await import('@excalidraw/excalidraw');
+
+            let initialData = { elements: [], appState: {} };
+            try {
+                const parsed = JSON.parse(code);
+                if (parsed) initialData = parsed;
+            } catch (e) {
+                // If code is not JSON, we might want to just show empty or try to parse
+            }
+
+            const root = createRoot(container);
+            const App = React.createElement(Excalidraw, {
+                initialData: initialData,
+            });
+            root.render(App);
+
+            this._log('info', 'Excalidraw loaded');
+        } catch (err) {
+            console.error(err);
+            this._log('error', 'Failed to load Excalidraw: ' + err.message);
+            container.innerHTML = '<div style="color:red;padding:20px">Failed to load Excalidraw</div>';
+        }
+        this._renderConsole();
     }
 
     async _runJavaScript(code, stdin = '') {
