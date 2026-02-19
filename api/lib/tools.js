@@ -5,6 +5,7 @@
 const { searchDuckDuckGo } = require('../search');
 const { fetchUrlContent } = require('../fetch-url');
 const { executeCodeWithLimits } = require('../execute');
+const { createExcalidrawDiagram } = require('./excalidraw-mcp');
 
 const TOOL_DEFINITIONS = [
     {
@@ -79,6 +80,20 @@ const TOOL_DEFINITIONS = [
                     recencyDays: { type: 'number', description: 'Recency preference in days.' },
                 },
                 required: ['claims'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'create_excalidraw_diagram',
+            description: 'Create an interactive Excalidraw diagram from a natural language prompt using the Excalidraw MCP app.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    prompt: { type: 'string', description: 'What diagram to draw.' },
+                },
+                required: ['prompt'],
             },
         },
     },
@@ -212,6 +227,14 @@ async function executeVerifyClaims(args) {
     return { verdicts };
 }
 
+
+async function executeCreateExcalidrawDiagram(args) {
+    const prompt = String(args?.prompt || '').trim();
+    if (!prompt) return { error: 'No prompt provided.' };
+    return await createExcalidrawDiagram(prompt);
+}
+
+
 function executeGetCurrentDatetime() {
     const now = new Date();
     return {
@@ -231,6 +254,7 @@ const TOOL_EXECUTORS = {
     execute_code: executeCode,
     verify_claims: executeVerifyClaims,
     get_current_datetime: executeGetCurrentDatetime,
+    create_excalidraw_diagram: executeCreateExcalidrawDiagram,
 };
 
 async function executeTool(toolName, args, context = {}) {

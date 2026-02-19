@@ -10,6 +10,7 @@ const MAX_TOOL_CALLS_PER_TOOL = {
     verify_claims: 2,
     execute_code: 2,
     get_current_datetime: 1,
+    create_excalidraw_diagram: 2,
 };
 const MAX_AGENT_WALL_TIME_MS = 25_000;
 
@@ -202,6 +203,7 @@ async function agenticLoop(request, model, messages) {
     let totalToolCalls = 0;
     const perToolCalls = new Map();
     const sourceMap = new Map();
+    let mcpApps = [];
     const metrics = {
         tool_error_count: 0,
         contradiction_rate: 0,
@@ -217,7 +219,9 @@ async function agenticLoop(request, model, messages) {
                 `You are an evidence-first assistant with access to web tools. Today's date is ${today}.\n` +
                 `Tool limits are strict: max ${MAX_TOOL_CALLS_TOTAL} total calls, and per-tool limits apply.\n` +
                 `Prioritize high-trust and recent sources, cite URLs inline as [Title](URL), and clearly flag uncertainty when evidence is weak.\n` +
-                `Use execute_code only when computation materially increases correctness.`,
+                `Use execute_code only when computation materially increases correctness.
+` +
+                `When users ask for diagrams/flowcharts/architecture visuals, call create_excalidraw_diagram and then summarize what was drawn.`,
         },
         ...messages,
     ];
@@ -260,7 +264,7 @@ async function agenticLoop(request, model, messages) {
                 metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
                 metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
                 structuredMetricLog(metrics);
-                return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+                return { ok: true, answer, sources: [...sourceMap.values()], metrics, mcpApps };
             }
             break;
         }
@@ -331,6 +335,14 @@ async function agenticLoop(request, model, messages) {
                             verdict.sources.forEach((s) => addSource(sourceMap, s));
                         }
                     }
+                } else if (toolName === 'create_excalidraw_diagram' && parsed?.app) {
+                    mcpApps.push({
+                        provider: 'excalidraw',
+                        tool: parsed.tool || toolName,
+                        prompt: parsed.prompt,
+                        summary: parsed.summary,
+                        app: parsed.app,
+                    });
                 }
             } catch {
                 metrics.tool_error_count += 1;
@@ -361,7 +373,7 @@ async function agenticLoop(request, model, messages) {
         metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
         metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
         structuredMetricLog(metrics);
-        return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        return { ok: true, answer, sources: [...sourceMap.values()], metrics, mcpApps };
     }
 
     const lastUserContent = getLastUserMessageContent(messages);
@@ -383,7 +395,7 @@ async function agenticLoop(request, model, messages) {
             metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
             metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
             structuredMetricLog(metrics);
-            return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+            return { ok: true, answer, sources: [...sourceMap.values()], metrics, mcpApps };
         }
     }
 
@@ -393,7 +405,7 @@ async function agenticLoop(request, model, messages) {
         metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
         metrics.citation_coverage_ratio = citationCoverageRatio(synthesized, [...sourceMap.values()]);
         structuredMetricLog(metrics);
-        return { ok: true, answer: synthesized, sources: [...sourceMap.values()], metrics };
+        return { ok: true, answer: synthesized, sources: [...sourceMap.values()], metrics, mcpApps };
     }
 
     structuredMetricLog(metrics);
@@ -435,6 +447,9 @@ module.exports = async function handler(request, response) {
                     startSSEStream(response);
                     if (result.sources?.length > 0) {
                         sendSSEEvent(response, 'sources', result.sources);
+                    }
+                    if (result.mcpApps?.length > 0) {
+                        sendSSEEvent(response, 'mcp_app', result.mcpApps);
                     }
                     sendSSEEvent(response, 'quality_metrics', result.metrics || {});
                     streamTextAsSSE(response, result.answer);
