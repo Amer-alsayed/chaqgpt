@@ -904,6 +904,35 @@ function updateEditButtonVisibility() {
 
 // --- Core Logic ---
 
+function buildExcalidrawViewHtml(excalidrawView) {
+    if (!excalidrawView || !excalidrawView.scene) return '';
+    const toolName = escapeHtml(excalidrawView.toolName || 'excalidraw_create_view');
+    const scene = excalidrawView.scene;
+    const lanes = Array.isArray(scene.lanes) ? scene.lanes.slice(0, 4) : [];
+    const laneHtml = lanes.map((lane, index) => `<div class="excalidraw-lane lane-${index + 1}">${escapeHtml(lane)}</div>`).join('');
+    const arrows = Array.isArray(scene.arrows) ? scene.arrows.slice(0, 3) : [];
+    const arrowHtml = arrows.map((arrow) => `
+        <div class="excalidraw-arrow-row">
+            <span>${escapeHtml(arrow.from || '')}</span>
+            <span class="arrow-line">⟶</span>
+            <span>${escapeHtml(arrow.to || '')}</span>
+            <span class="arrow-label">${escapeHtml(arrow.label || '')}</span>
+        </div>
+    `).join('');
+
+    return `<div class="excalidraw-view-card">
+        <div class="excalidraw-view-header">
+            <span class="excalidraw-view-tool">${toolName}</span>
+        </div>
+        <div class="excalidraw-view-canvas">
+            <div class="excalidraw-title">${escapeHtml(scene.title || 'Diagram')}</div>
+            <div class="excalidraw-lanes">${laneHtml}</div>
+            <div class="excalidraw-arrows">${arrowHtml}</div>
+            <div class="excalidraw-caption">${escapeHtml(scene.caption || '')}</div>
+        </div>
+    </div>`;
+}
+
 /** Build HTML for source cards (shared by streaming and history rendering) */
 function buildSourcesHtml(sources) {
     const PREVIEW_SOURCES_COUNT = 4;
@@ -968,7 +997,7 @@ function buildResponseActivity(mode = 'normal', compact = false) {
     </div>`;
 }
 
-async function addAssistantMessage(content, showTyping = true, sources = null) {
+async function addAssistantMessage(content, showTyping = true, sources = null, excalidrawView = null) {
     initMessagesContainer();
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group assistant';
@@ -1007,6 +1036,11 @@ async function addAssistantMessage(content, showTyping = true, sources = null) {
 
     html += `
         <div class="assistant-message-text"></div>`;
+
+    // Render interactive Excalidraw-style card if provided
+    if (excalidrawView) {
+        html += buildExcalidrawViewHtml(excalidrawView);
+    }
 
     // Render source cards if provided (for loaded chats)
     if (sources && Array.isArray(sources) && sources.length > 0) {
@@ -1486,6 +1520,7 @@ window.sendMessage = async function () {
         let reasoningContent = '';
         let fullAssistantContent = '';
         let searchSources = []; // Collected from SSE 'sources' event
+        let excalidrawView = null; // Collected from SSE 'excalidraw_view' event
         let currentSSEEvent = ''; // Track custom SSE event types
 
         // --- Loop / repetition detection ---
@@ -1541,6 +1576,16 @@ window.sendMessage = async function () {
                         try {
                             const sources = JSON.parse(data);
                             if (Array.isArray(sources)) searchSources = sources;
+                        } catch { }
+                        currentSSEEvent = '';
+                        continue;
+                    }
+
+                    // Handle custom 'excalidraw_view' event
+                    if (currentSSEEvent === 'excalidraw_view') {
+                        try {
+                            const viewPayload = JSON.parse(data);
+                            if (viewPayload && typeof viewPayload === 'object') excalidrawView = viewPayload;
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1646,6 +1691,11 @@ window.sendMessage = async function () {
         finalHtml += `
     <div class="assistant-message-text"> ${formattedContent}</div>`;
 
+        // Add interactive Excalidraw-style card if available
+        if (excalidrawView) {
+            finalHtml += buildExcalidrawViewHtml(excalidrawView);
+        }
+
         // Add search source cards if available
         if (searchSources.length > 0) {
             finalHtml += buildSourcesHtml(searchSources);
@@ -1675,7 +1725,7 @@ window.sendMessage = async function () {
         if (!shouldStopTyping) {
             // Store both content and reasoning for history
             const fullContent = thinkingContent ? `<think>${thinkingContent}</think>\n\n${finalContent}` : finalContent;
-            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined });
+            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined, excalidrawView: excalidrawView || undefined });
             saveCurrentChat();
             renderChatHistory();
         }
@@ -2535,7 +2585,7 @@ function loadChat(chatId, itemEl) {
             const parsed = parseUserContentForRender(msg.content);
             addUserMessage(parsed.text, parsed.images, parsed.files);
         } else if (msg.role === 'assistant') {
-            addAssistantMessage(msg.content, false, msg.sources || null);
+            addAssistantMessage(msg.content, false, msg.sources || null, msg.excalidrawView || null);
         }
     });
     document.querySelectorAll('#chatHistory .nav-item').forEach(item => item.classList.remove('active'));
