@@ -904,6 +904,60 @@ function updateEditButtonVisibility() {
 
 // --- Core Logic ---
 
+function safeExternalUrl(url) {
+    try {
+        const parsed = new URL(String(url || ''));
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.toString();
+    } catch { }
+    return '';
+}
+
+function buildExcalidrawViewHtml(excalidrawView) {
+    if (!excalidrawView || !excalidrawView.app) return '';
+    const toolName = escapeHtml(excalidrawView.toolName || 'excalidraw_create_view');
+    const app = excalidrawView.app;
+    const title = escapeHtml(app.title || 'Excalidraw MCP App');
+    const description = escapeHtml(app.description || 'Interactive Excalidraw canvas rendered in chat.');
+    const prompt = escapeHtml(app.prompt || '');
+    const iframeUrl = safeExternalUrl(app.iframeUrl);
+    const openUrl = safeExternalUrl(app.openUrl || app.iframeUrl || app.fallbackUrl);
+    const fallbackUrl = safeExternalUrl(app.fallbackUrl);
+
+    const iframeHtml = iframeUrl
+        ? `<iframe class="excalidraw-app-iframe" src="${iframeUrl}" title="${title}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>`
+        : `<div class="excalidraw-app-unavailable">Interactive preview is unavailable in this environment.</div>`;
+
+    return `<div class="excalidraw-view-card">
+        <div class="excalidraw-view-header">
+            <span class="excalidraw-view-tool">${toolName}</span>
+            <div class="excalidraw-view-actions">
+                <button class="excalidraw-view-btn" type="button" onclick="window.toggleExcalidrawFullscreen(this)">Fullscreen</button>
+                ${openUrl ? `<button class="excalidraw-view-btn" type="button" onclick="window.openExcalidrawApp('${openUrl}')">Open</button>` : ''}
+            </div>
+        </div>
+        <div class="excalidraw-view-canvas">
+            <div class="excalidraw-title">${title}</div>
+            <div class="excalidraw-caption">${description}</div>
+            ${prompt ? `<div class="excalidraw-prompt">Prompt: ${prompt}</div>` : ''}
+            <div class="excalidraw-app-frame-wrap">${iframeHtml}</div>
+            ${fallbackUrl && !openUrl ? `<a class="excalidraw-fallback-link" href="${fallbackUrl}" target="_blank" rel="noopener noreferrer">Open fallback Excalidraw editor</a>` : ''}
+        </div>
+    </div>`;
+}
+
+window.openExcalidrawApp = function (url) {
+    const safe = safeExternalUrl(url);
+    if (!safe) return;
+    window.open(safe, '_blank', 'noopener,noreferrer');
+};
+
+window.toggleExcalidrawFullscreen = function (button) {
+    const card = button?.closest('.excalidraw-view-card');
+    if (!card) return;
+    card.classList.toggle('is-fullscreen');
+    button.textContent = card.classList.contains('is-fullscreen') ? 'Exit Fullscreen' : 'Fullscreen';
+};
+
 /** Build HTML for source cards (shared by streaming and history rendering) */
 function buildSourcesHtml(sources) {
     const PREVIEW_SOURCES_COUNT = 4;
@@ -968,7 +1022,7 @@ function buildResponseActivity(mode = 'normal', compact = false) {
     </div>`;
 }
 
-async function addAssistantMessage(content, showTyping = true, sources = null) {
+async function addAssistantMessage(content, showTyping = true, sources = null, excalidrawView = null) {
     initMessagesContainer();
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group assistant';
@@ -1007,6 +1061,11 @@ async function addAssistantMessage(content, showTyping = true, sources = null) {
 
     html += `
         <div class="assistant-message-text"></div>`;
+
+    // Render interactive Excalidraw-style card if provided
+    if (excalidrawView) {
+        html += buildExcalidrawViewHtml(excalidrawView);
+    }
 
     // Render source cards if provided (for loaded chats)
     if (sources && Array.isArray(sources) && sources.length > 0) {
@@ -1486,6 +1545,7 @@ window.sendMessage = async function () {
         let reasoningContent = '';
         let fullAssistantContent = '';
         let searchSources = []; // Collected from SSE 'sources' event
+        let excalidrawView = null; // Collected from SSE 'excalidraw_view' event
         let currentSSEEvent = ''; // Track custom SSE event types
 
         // --- Loop / repetition detection ---
@@ -1541,6 +1601,16 @@ window.sendMessage = async function () {
                         try {
                             const sources = JSON.parse(data);
                             if (Array.isArray(sources)) searchSources = sources;
+                        } catch { }
+                        currentSSEEvent = '';
+                        continue;
+                    }
+
+                    // Handle custom 'excalidraw_view' event
+                    if (currentSSEEvent === 'excalidraw_view') {
+                        try {
+                            const viewPayload = JSON.parse(data);
+                            if (viewPayload && typeof viewPayload === 'object') excalidrawView = viewPayload;
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1646,6 +1716,11 @@ window.sendMessage = async function () {
         finalHtml += `
     <div class="assistant-message-text"> ${formattedContent}</div>`;
 
+        // Add interactive Excalidraw-style card if available
+        if (excalidrawView) {
+            finalHtml += buildExcalidrawViewHtml(excalidrawView);
+        }
+
         // Add search source cards if available
         if (searchSources.length > 0) {
             finalHtml += buildSourcesHtml(searchSources);
@@ -1675,7 +1750,7 @@ window.sendMessage = async function () {
         if (!shouldStopTyping) {
             // Store both content and reasoning for history
             const fullContent = thinkingContent ? `<think>${thinkingContent}</think>\n\n${finalContent}` : finalContent;
-            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined });
+            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined, excalidrawView: excalidrawView || undefined });
             saveCurrentChat();
             renderChatHistory();
         }
@@ -2535,7 +2610,7 @@ function loadChat(chatId, itemEl) {
             const parsed = parseUserContentForRender(msg.content);
             addUserMessage(parsed.text, parsed.images, parsed.files);
         } else if (msg.role === 'assistant') {
-            addAssistantMessage(msg.content, false, msg.sources || null);
+            addAssistantMessage(msg.content, false, msg.sources || null, msg.excalidrawView || null);
         }
     });
     document.querySelectorAll('#chatHistory .nav-item').forEach(item => item.classList.remove('active'));
