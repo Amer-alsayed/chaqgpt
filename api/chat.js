@@ -13,6 +13,45 @@ const MAX_TOOL_CALLS_PER_TOOL = {
 };
 const MAX_AGENT_WALL_TIME_MS = 25_000;
 
+function extractUserText(messageContent) {
+    if (typeof messageContent === 'string') return messageContent;
+    if (!Array.isArray(messageContent)) return '';
+    return messageContent
+        .filter((part) => part?.type === 'text')
+        .map((part) => String(part.text || ''))
+        .join(' ')
+        .trim();
+}
+
+function isExcalidrawIntent(text) {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized) return false;
+    return /(diagram|sequence|flow|architecture|workflow|timeline|excalidraw|draw|chart)/.test(normalized);
+}
+
+function buildExcalidrawEventPayload(messages) {
+    const lastUser = getLastUserMessageContent(messages || []);
+    const promptText = extractUserText(lastUser);
+    if (!isExcalidrawIntent(promptText)) return null;
+
+    const encodedPrompt = encodeURIComponent(promptText);
+    const remoteAppBase = 'https://mcp.excalidraw.com';
+
+    return {
+        toolName: 'excalidraw_create_view',
+        app: {
+            kind: 'mcp_app_iframe',
+            title: 'Excalidraw MCP App',
+            description: 'Interactive Excalidraw canvas with fullscreen editing.',
+            remoteServer: remoteAppBase,
+            iframeUrl: `${remoteAppBase}/?prompt=${encodedPrompt}`,
+            openUrl: `${remoteAppBase}/?prompt=${encodedPrompt}`,
+            fallbackUrl: `https://excalidraw.com/#?prompt=${encodedPrompt}`,
+            prompt: promptText,
+        },
+    };
+}
+
 async function pipeStream(readable, writable) {
     const reader = readable.getReader();
     while (true) {
@@ -427,12 +466,15 @@ module.exports = async function handler(request, response) {
             return response.status(400).json({ error: 'Only PDF files are supported.' });
         }
 
+        const excalidrawView = buildExcalidrawEventPayload(messages);
+
         if (searchEnabled) {
             const supportsTools = Boolean(modelInfo.capabilities.toolUse);
             if (supportsTools) {
                 const result = await agenticLoop(request, model, messages);
                 if (result.ok) {
                     startSSEStream(response);
+                    if (excalidrawView) sendSSEEvent(response, 'excalidraw_view', excalidrawView);
                     if (result.sources?.length > 0) {
                         sendSSEEvent(response, 'sources', result.sources);
                     }
@@ -456,6 +498,7 @@ module.exports = async function handler(request, response) {
             if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
 
             startSSEStream(response);
+            if (excalidrawView) sendSSEEvent(response, 'excalidraw_view', excalidrawView);
             if (searchSources.length > 0) sendSSEEvent(response, 'sources', searchSources);
             await pipeStream(failoverResult.response.body, response);
             return;
@@ -465,6 +508,7 @@ module.exports = async function handler(request, response) {
         if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
 
         startSSEStream(response);
+        if (excalidrawView) sendSSEEvent(response, 'excalidraw_view', excalidrawView);
         await pipeStream(failoverResult.response.body, response);
     } catch (error) {
         console.error('An error occurred:', error);
@@ -492,4 +536,6 @@ module.exports.__test = {
     citationCoverageRatio,
     extractCitedUrls,
     ensureCitationGuard,
+    isExcalidrawIntent,
+    buildExcalidrawEventPayload,
 };

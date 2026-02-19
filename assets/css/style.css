@@ -2668,6 +2668,116 @@ body.light-theme .hljs-meta {
     color: #059669;
 }
 
+
+/* --- EXCALIDRAW MCP VIEW CARD --- */
+.excalidraw-view-card {
+    margin-top: 12px;
+    border: 1px solid rgba(124, 108, 255, 0.25);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+    position: relative;
+}
+
+.excalidraw-view-card.is-fullscreen {
+    position: fixed;
+    inset: 16px;
+    margin: 0;
+    z-index: 2000;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.excalidraw-view-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.excalidraw-view-tool {
+    font-size: 12px;
+    color: #9f8bff;
+    font-weight: 600;
+}
+
+.excalidraw-view-actions {
+    display: inline-flex;
+    gap: 8px;
+}
+
+.excalidraw-view-btn {
+    border: 1px solid rgba(124, 108, 255, 0.35);
+    background: rgba(124, 108, 255, 0.12);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.excalidraw-view-canvas {
+    padding: 12px;
+}
+
+.excalidraw-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.excalidraw-caption {
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+.excalidraw-prompt {
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.excalidraw-app-frame-wrap {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 360px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.excalidraw-view-card.is-fullscreen .excalidraw-app-frame-wrap {
+    min-height: calc(100vh - 180px);
+}
+
+.excalidraw-app-iframe {
+    width: 100%;
+    height: 360px;
+    border: 0;
+    display: block;
+}
+
+.excalidraw-view-card.is-fullscreen .excalidraw-app-iframe {
+    height: calc(100vh - 180px);
+}
+
+.excalidraw-app-unavailable {
+    min-height: 240px;
+    display: grid;
+    place-items: center;
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+.light-theme .excalidraw-view-card {
+    border-color: rgba(124, 108, 255, 0.32);
+    background: rgba(124, 108, 255, 0.04);
+}
+
+.light-theme .excalidraw-view-header {
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
 /* --- SEARCH SOURCE CARDS --- */
 .search-sources {
     margin-top: 16px;
