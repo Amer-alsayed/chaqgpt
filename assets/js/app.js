@@ -1111,8 +1111,8 @@ function formatContentForCanvas(raw) {
 
     // Extract all code blocks
     const codeBlocks = [];
-    const textOnly = raw.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        codeBlocks.push({ lang: (lang || 'html').toLowerCase(), code: code.trim() });
+    const textOnly = raw.replace(/```([^\n]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        codeBlocks.push({ lang: (lang || 'html').trim().toLowerCase(), code: code.trim() });
         return ''; // Remove code block from text
     });
 
@@ -1163,8 +1163,8 @@ function formatContent(raw) {
 
     // 1. Extract code blocks BEFORE escaping (preserve raw content)
     const blocks = [];
-    let text = raw.replace(/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        blocks.push({ lang: (lang || 'plaintext').toLowerCase(), code: code.trim() });
+    let text = raw.replace(/```([^\n]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        blocks.push({ lang: (lang || 'plaintext').trim().toLowerCase(), code: code.trim() });
         return `\n[[[BLOCK_${blocks.length - 1}]]]\n`;
     });
 
@@ -1900,7 +1900,7 @@ function buildStreamingRenderState(rawText) {
 }
 function buildCanvasStreamingRenderState(rawText) {
     let liveText = rawText || '';
-    liveText = liveText.replace(/```[a-zA-Z0-9_+-]*\n[\s\S]*?```/g, '');
+    liveText = liveText.replace(/```[^\n]*\n[\s\S]*?```/g, '');
 
     const unclosedIdx = liveText.indexOf('```');
     let isWritingCode = false;
