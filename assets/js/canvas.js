@@ -857,7 +857,8 @@ class CanvasManager {
         try {
             const { default: React } = await import('react');
             const { createRoot } = await import('react-dom/client');
-            const { Excalidraw } = await import('@excalidraw/excalidraw');
+            const excalidrawModule = await import('@excalidraw/excalidraw');
+            const Excalidraw = excalidrawModule.Excalidraw || (excalidrawModule.default && excalidrawModule.default.Excalidraw) || excalidrawModule.default;
 
             let initialData = { elements: [], appState: {} };
             try {
