@@ -2668,6 +2668,96 @@ body.light-theme .hljs-meta {
     color: #059669;
 }
 
+
+/* --- EXCALIDRAW MCP VIEW CARD --- */
+.excalidraw-view-card {
+    margin-top: 12px;
+    border: 1px solid rgba(124, 108, 255, 0.25);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.excalidraw-view-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.excalidraw-view-tool {
+    font-size: 12px;
+    color: #9f8bff;
+    font-weight: 600;
+}
+
+.excalidraw-view-canvas {
+    padding: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+}
+
+.excalidraw-title {
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.excalidraw-lanes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.excalidraw-lane {
+    border: 1px dashed rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.excalidraw-arrows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.excalidraw-arrow-row {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+}
+
+.excalidraw-arrow-row .arrow-line {
+    color: #7c6cff;
+}
+
+.excalidraw-arrow-row .arrow-label {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.excalidraw-caption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+.light-theme .excalidraw-view-card {
+    border-color: rgba(124, 108, 255, 0.32);
+    background: rgba(124, 108, 255, 0.04);
+}
+
+.light-theme .excalidraw-view-header {
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+.light-theme .excalidraw-lane {
+    border-color: rgba(0, 0, 0, 0.22);
+    background: rgba(0, 0, 0, 0.02);
+}
+
 /* --- SEARCH SOURCE CARDS --- */
 .search-sources {
     margin-top: 16px;
