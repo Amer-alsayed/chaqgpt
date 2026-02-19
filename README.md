@@ -99,12 +99,38 @@ The app will be available at `http://localhost:3000`.
    | `OPENROUTER_KEY_COOLDOWN_AUTH_MS` | Optional. Default `21600000` (6 h) |
    | `OPENROUTER_KEY_COOLDOWN_TRANSIENT_MS` | Optional. Default `30000` (30 s) |
    | `OPENROUTER_MAX_FAILOVER_ATTEMPTS` | Optional. Default `10` |
+   | `EXCALIDRAW_MCP_COMMAND` | Optional. Command used to launch Excalidraw MCP server locally. Default `node` |
+   | `EXCALIDRAW_MCP_ARGS` | Optional. Space-separated args for MCP server command. Default `excalidraw-mcp/dist/index.js` |
 4. **Deploy** — that's it!
 
 > [!TIP]
 > The app automatically fetches all available free models from OpenRouter at runtime. No config changes needed when new models are added.
 
 ---
+
+
+## 🧩 Excalidraw MCP App Integration
+
+ChaqGPT now includes an **agent tool** named `create_excalidraw_diagram` that can call a locally running Excalidraw MCP server and render interactive MCP App views inline (iframe-style) in chat.
+
+### Local setup
+
+```bash
+# clone & build Excalidraw MCP server
+git clone https://github.com/excalidraw/excalidraw-mcp
+cd excalidraw-mcp
+npm install
+npm run build
+```
+
+Then configure your `.env` in ChaqGPT:
+
+```bash
+EXCALIDRAW_MCP_COMMAND=node
+EXCALIDRAW_MCP_ARGS="/absolute/path/to/excalidraw-mcp/dist/index.js"
+```
+
+When users ask for a flowchart, architecture diagram, sequence diagram, etc. and tool use is enabled, the assistant can call this tool and embed the returned Excalidraw view directly in the chat UI.
 
 ## 🤖 Default Model
 

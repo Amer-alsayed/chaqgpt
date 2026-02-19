@@ -5081,3 +5081,37 @@ body.light-theme .message-input {
 }
 
 
+
+.mcp-apps {
+    margin-top: 14px;
+    display: grid;
+    gap: 12px;
+}
+
+.mcp-app-card {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface-secondary);
+}
+
+.mcp-app-header {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mcp-app-frame {
+    width: 100%;
+    min-height: 420px;
+    border: 0;
+    background: #fff;
+}
+
+.mcp-app-fallback {
+    margin: 0;
+    padding: 12px;
+    font-size: 13px;
+    color: var(--accent-error);
+}

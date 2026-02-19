@@ -927,6 +927,43 @@ function buildSourcesHtml(sources) {
     return html;
 }
 
+
+
+function sanitizeHttpUrl(url) {
+    const value = String(url || '').trim();
+    if (!/^https?:\/\//i.test(value)) return '';
+    return value;
+}
+
+function buildMcpAppsHtml(apps) {
+    if (!Array.isArray(apps) || apps.length === 0) return '';
+    let html = '<div class="mcp-apps">';
+    for (const item of apps) {
+        const app = item?.app || {};
+        const summary = escapeHtml(item?.summary || 'Interactive Excalidraw view');
+        html += '<div class="mcp-app-card">';
+        html += `<div class="mcp-app-header">${summary}</div>`;
+
+        if (app.type === 'url') {
+            const safeUrl = sanitizeHttpUrl(app.url);
+            if (safeUrl) {
+                html += `<iframe class="mcp-app-frame" src="${safeUrl}" loading="lazy" referrerpolicy="no-referrer"></iframe>`;
+            } else {
+                html += '<p class="mcp-app-fallback">MCP app returned an unsupported URL.</p>';
+            }
+        } else if (app.type === 'html') {
+            const srcdoc = escapeHtml(String(app.html || ''));
+            html += `<iframe class="mcp-app-frame" srcdoc="${srcdoc}"></iframe>`;
+        } else {
+            html += '<p class="mcp-app-fallback">MCP app payload is not embeddable in this client.</p>';
+        }
+
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
 window.toggleSourcesList = function (button) {
     const container = button.closest('.search-sources');
     const list = container ? container.querySelector('.search-sources-list') : null;
@@ -968,7 +1005,7 @@ function buildResponseActivity(mode = 'normal', compact = false) {
     </div>`;
 }
 
-async function addAssistantMessage(content, showTyping = true, sources = null) {
+async function addAssistantMessage(content, showTyping = true, sources = null, mcpApps = null) {
     initMessagesContainer();
     const messageGroup = document.createElement('div');
     messageGroup.className = 'message-group assistant';
@@ -1011,6 +1048,9 @@ async function addAssistantMessage(content, showTyping = true, sources = null) {
     // Render source cards if provided (for loaded chats)
     if (sources && Array.isArray(sources) && sources.length > 0) {
         html += buildSourcesHtml(sources);
+    }
+    if (mcpApps && Array.isArray(mcpApps) && mcpApps.length > 0) {
+        html += buildMcpAppsHtml(mcpApps);
     }
 
     html += `
@@ -1486,6 +1526,7 @@ window.sendMessage = async function () {
         let reasoningContent = '';
         let fullAssistantContent = '';
         let searchSources = []; // Collected from SSE 'sources' event
+        let mcpApps = []; // Collected from SSE 'mcp_app' event
         let currentSSEEvent = ''; // Track custom SSE event types
 
         // --- Loop / repetition detection ---
@@ -1541,6 +1582,15 @@ window.sendMessage = async function () {
                         try {
                             const sources = JSON.parse(data);
                             if (Array.isArray(sources)) searchSources = sources;
+                        } catch { }
+                        currentSSEEvent = '';
+                        continue;
+                    }
+
+                    if (currentSSEEvent === 'mcp_app') {
+                        try {
+                            const payload = JSON.parse(data);
+                            if (Array.isArray(payload)) mcpApps = payload;
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1650,6 +1700,9 @@ window.sendMessage = async function () {
         if (searchSources.length > 0) {
             finalHtml += buildSourcesHtml(searchSources);
         }
+        if (mcpApps.length > 0) {
+            finalHtml += buildMcpAppsHtml(mcpApps);
+        }
 
         finalHtml += `
         <div class="assistant-actions">
@@ -1675,7 +1728,7 @@ window.sendMessage = async function () {
         if (!shouldStopTyping) {
             // Store both content and reasoning for history
             const fullContent = thinkingContent ? `<think>${thinkingContent}</think>\n\n${finalContent}` : finalContent;
-            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined });
+            conversationHistory.push({ role: 'assistant', content: fullContent, sources: searchSources.length > 0 ? searchSources : undefined, mcpApps: mcpApps.length > 0 ? mcpApps : undefined });
             saveCurrentChat();
             renderChatHistory();
         }
@@ -2535,7 +2588,7 @@ function loadChat(chatId, itemEl) {
             const parsed = parseUserContentForRender(msg.content);
             addUserMessage(parsed.text, parsed.images, parsed.files);
         } else if (msg.role === 'assistant') {
-            addAssistantMessage(msg.content, false, msg.sources || null);
+            addAssistantMessage(msg.content, false, msg.sources || null, msg.mcpApps || null);
         }
     });
     document.querySelectorAll('#chatHistory .nav-item').forEach(item => item.classList.remove('active'));
