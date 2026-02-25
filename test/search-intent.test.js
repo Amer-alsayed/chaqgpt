@@ -11,6 +11,13 @@ test('benchmark query profile enables trusted benchmark domains', () => {
     assert.ok(profile.seedQueries.some((q) => /leaderboard/i.test(q)));
 });
 
+test('current office query profile enables official domains', () => {
+    const profile = tools.__test.buildSearchProfile('who is the president of the usa');
+    assert.equal(profile.intent, 'current_office');
+    assert.ok(profile.trustedDomains.includes('whitehouse.gov'));
+    assert.ok(profile.domainSeedQueries.some((q) => q.includes('site:whitehouse.gov')));
+});
+
 test('decomposeSearchQueries expands benchmark intents with focused queries', () => {
     const queries = tools.__test.decomposeSearchQueries('latest ai model benchmarks');
     assert.ok(queries.length >= 4);

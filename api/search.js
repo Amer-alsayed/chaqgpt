@@ -63,6 +63,16 @@ const AI_BENCHMARK_DOMAINS = new Set([
     'github.com',
 ]);
 
+const CURRENT_OFFICE_DOMAINS = new Set([
+    'whitehouse.gov',
+    'usa.gov',
+    'house.gov',
+    'senate.gov',
+    'congress.gov',
+    'govtrack.us',
+    'archives.gov',
+]);
+
 const GENERIC_NEWS_DOMAINS = new Set([
     'apnews.com',
     'reuters.com',
@@ -142,12 +152,20 @@ function setCachedSearch(key, results) {
 }
 
 function shouldUseBingRss(query) {
-    return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(String(query || ''));
+    const q = String(query || '');
+    return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(q)
+        || isCurrentOfficeQuery(q);
 }
 
 function isRecencySensitiveQuery(query) {
     return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm)\b/i
         .test(String(query || ''));
+}
+
+function isCurrentOfficeQuery(query) {
+    const q = String(query || '').toLowerCase();
+    return /\b(who is|current|incumbent|serving)\b/.test(q)
+        && /\b(president|prime minister|ceo|governor|chancellor|secretary of state|speaker of the house)\b/.test(q);
 }
 
 function isAIBenchmarkQuery(query) {
@@ -258,15 +276,15 @@ function parseDuckDuckGoLiteHTML(html) {
     while ((match = linkRegex.exec(html))) {
         let url = decodeHTMLEntities(match[1]);
         const label = cleanWhitespace(decodeHTMLEntities(stripHTMLTags(match[2] || '')));
-        if (!/^https?:\/\//i.test(url)) continue;
-        if (!label || label.length < 2) continue;
-
         const uddgMatch = url.match(/[?&]uddg=([^&]+)/i);
         if (uddgMatch) {
             try {
                 url = decodeURIComponent(uddgMatch[1]);
             } catch { }
         }
+
+        if (!/^https?:\/\//i.test(url)) continue;
+        if (!label || label.length < 2) continue;
 
         results.push({
             title: label,
@@ -315,6 +333,7 @@ function trustScore(result, trustedDomains = [], highStakes = false, query = '')
     if (!domain) return 0.2;
     if (trustedDomains.includes(domain)) return 1;
     if (isAIBenchmarkQuery(query) && AI_BENCHMARK_DOMAINS.has(domain)) return 0.96;
+    if (isCurrentOfficeQuery(query) && CURRENT_OFFICE_DOMAINS.has(domain)) return 0.97;
     if (domain === 'wikipedia.org') return 0.78;
     if (HIGH_TRUST_DOMAINS.has(domain)) return 0.92;
     if (domain.endsWith('.gov') || domain.endsWith('.edu')) return 0.9;
@@ -359,6 +378,15 @@ function applyQueryIntentAdjustment(result, query) {
     if (wantsCurrentOffice) {
         if (domain.endsWith('.gov') || domain.includes('whitehouse.gov') || domain.includes('usa.gov')) delta += 0.09;
         if (domain === 'wikipedia.org') delta -= 0.03;
+    }
+
+    if (isCurrentOfficeQuery(q)) {
+        const hasCurrentSignal = /\b(current|incumbent|administration|official|term|serving)\b/.test(text);
+        const hasHistoricalSignal = /\b(list of|past presidents|historical|history|former presidents)\b/.test(text);
+        if (CURRENT_OFFICE_DOMAINS.has(domain)) delta += 0.18;
+        if (hasCurrentSignal) delta += 0.08;
+        if (hasHistoricalSignal) delta -= 0.16;
+        if (GENERIC_NEWS_DOMAINS.has(domain) && !hasCurrentSignal) delta -= 0.06;
     }
 
     const wantsAIBenchmark = isAIBenchmarkQuery(q);
@@ -715,7 +743,7 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
     const excludeDomains = normalizeDomainList(options.excludeDomains);
 
     const searchQuery = ensureRecencyHint(sanitizeSearchQuery(query));
-    const recencyDays = isRecencySensitiveQuery(searchQuery)
+    const recencyDays = isRecencySensitiveQuery(searchQuery) || isCurrentOfficeQuery(searchQuery)
         ? Math.min(baseRecencyDays, 21)
         : baseRecencyDays;
     const cacheKey = makeCacheKey(searchQuery, {
@@ -767,7 +795,14 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             query: searchQuery,
         });
 
-        const needsSecondary = primaryRanked.length < Math.max(4, maxResults);
+        const currentOffice = isCurrentOfficeQuery(searchQuery);
+        const trustedPrimaryCount = primaryRanked.filter((item) => (
+            CURRENT_OFFICE_DOMAINS.has(item.domain)
+            || trustedDomains.includes(item.domain)
+            || item.trustScore >= 0.9
+        )).length;
+        const needsSecondary = primaryRanked.length < Math.max(4, maxResults)
+            || (currentOffice && trustedPrimaryCount < 2);
         if (needsSecondary) {
             const secondaryProviders = [
                 searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),

@@ -77,3 +77,10 @@ test('safe execution limits reject oversized code', () => {
         /Code exceeds max allowed size/,
     );
 });
+
+test('parseDuckDuckGoLiteHTML decodes redirect links with uddg target', () => {
+    const html = '<a href=\"/l/?kh=-1&uddg=https%3A%2F%2Fwhitehouse.gov%2Fadministration\">White House</a>';
+    const parsed = require('../api/search').__test.parseDuckDuckGoLiteHTML(html);
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0].url, 'https://whitehouse.gov/administration');
+});
