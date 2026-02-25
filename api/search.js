@@ -5,8 +5,10 @@
 const MAX_RESULTS_DEFAULT = 5;
 const MAX_RESULTS_LIMIT = 10;
 const SEARCH_TIMEOUT_MS = 10_000;
-const PROVIDER_TIMEOUT_MS = 5_000;
-const PROVIDER_RETRY_COUNT = 2;
+const PROVIDER_TIMEOUT_MS = 3_500;
+const PROVIDER_RETRY_COUNT = 1;
+const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_MAX_ENTRIES = 200;
 
 const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
 const DDG_LITE_URL = 'https://lite.duckduckgo.com/lite/';
@@ -54,6 +56,8 @@ const BROWSER_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
 };
 
+const searchCache = new Map();
+
 function sanitizeSearchQuery(input) {
     const original = String(input || '').trim();
     if (!original) return '';
@@ -71,6 +75,55 @@ function sanitizeSearchQuery(input) {
     if (reduced.length >= 3) q = reduced.join(' ');
 
     return q.slice(0, 180);
+}
+
+function makeCacheKey(query, options) {
+    return JSON.stringify({
+        q: query,
+        maxResults: options.maxResults,
+        locale: options.locale,
+        recencyDays: options.recencyDays,
+        trustedDomains: options.trustedDomains,
+        excludeDomains: options.excludeDomains,
+    });
+}
+
+function getCachedSearch(key) {
+    const hit = searchCache.get(key);
+    if (!hit) return null;
+    if (Date.now() - hit.cachedAt > SEARCH_CACHE_TTL_MS) {
+        searchCache.delete(key);
+        return null;
+    }
+    return hit.results;
+}
+
+function setCachedSearch(key, results) {
+    searchCache.set(key, {
+        cachedAt: Date.now(),
+        results,
+    });
+    if (searchCache.size > SEARCH_CACHE_MAX_ENTRIES) {
+        const first = searchCache.keys().next();
+        if (!first.done) searchCache.delete(first.value);
+    }
+}
+
+function shouldUseBingRss(query) {
+    return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(String(query || ''));
+}
+
+function isRecencySensitiveQuery(query) {
+    return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm)\b/i
+        .test(String(query || ''));
+}
+
+function ensureRecencyHint(query) {
+    const q = String(query || '').trim();
+    if (!q) return q;
+    if (/\b(19|20)\d{2}\b/.test(q)) return q;
+    if (!isRecencySensitiveQuery(q)) return q;
+    return `${q} ${new Date().getFullYear()}`;
 }
 
 function sleep(ms) {
@@ -193,6 +246,11 @@ function extractYearSignals(text) {
 
 function inferPublishedDate(result) {
     if (result.publishedAt) return result.publishedAt;
+    const urlYear = String(result.url || '').match(/(?:19|20)\d{2}/g);
+    if (urlYear && urlYear.length > 0) {
+        const latestFromUrl = Math.max(...urlYear.map((y) => Number(y)).filter(Number.isFinite));
+        if (latestFromUrl >= 1990 && latestFromUrl <= 2100) return `${latestFromUrl}-01-01`;
+    }
     const years = extractYearSignals(`${result.title} ${result.snippet}`);
     if (years.length === 0) return null;
     const latest = Math.max(...years);
@@ -200,9 +258,11 @@ function inferPublishedDate(result) {
     return `${latest}-01-01`;
 }
 
-function freshnessScore(result, recencyDays) {
+function freshnessScore(result, recencyDays, query = '') {
     const publishedAt = inferPublishedDate(result);
-    if (!publishedAt) return 0.35;
+    if (!publishedAt) {
+        return isRecencySensitiveQuery(query) ? 0.15 : 0.35;
+    }
     const date = Date.parse(publishedAt);
     if (!Number.isFinite(date)) return 0.35;
     const days = Math.max(0, (Date.now() - date) / (24 * 60 * 60 * 1000));
@@ -505,6 +565,7 @@ function dedupeAndScore(rawResults, options) {
     } = options || {};
 
     const highStakes = isHighStakesQuery(query);
+    const recencySensitive = isRecencySensitiveQuery(query);
     const seen = new Map();
     const agreementMap = new Map();
 
@@ -529,10 +590,19 @@ function dedupeAndScore(rawResults, options) {
         }
 
         const domainTrust = trustScore(result, trustedDomains, highStakes);
-        const freshness = freshnessScore(result, recencyDays);
+        const freshness = freshnessScore(result, recencyDays, query);
         const specificity = specificityScore(result);
         const providerWeight = PROVIDER_WEIGHTS[result.sourceEngine] || 0.1;
         const agreement = Math.min(1, ((agreementMap.get(result.url)?.size || 1) - 1) * 0.3);
+        const publishedAt = inferPublishedDate(result);
+        const publishedYear = publishedAt ? Number(String(publishedAt).slice(0, 4)) : null;
+
+        if (recencySensitive && publishedYear && Number.isFinite(publishedYear)) {
+            const cutoff = new Date().getFullYear() - 3;
+            if (publishedYear < cutoff) {
+                continue;
+            }
+        }
 
         const score =
             (domainTrust * 0.45) +
@@ -593,23 +663,29 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         MAX_RESULTS_LIMIT,
     );
     const locale = String(options.locale || DEFAULT_LOCALE);
-    const recencyDays = Math.max(1, Number(options.recencyDays) || DEFAULT_RECENCY_DAYS);
+    const baseRecencyDays = Math.max(1, Number(options.recencyDays) || DEFAULT_RECENCY_DAYS);
     const trustedDomains = normalizeDomainList(options.trustedDomains);
     const excludeDomains = normalizeDomainList(options.excludeDomains);
 
-    const searchQuery = sanitizeSearchQuery(query);
+    const searchQuery = ensureRecencyHint(sanitizeSearchQuery(query));
+    const recencyDays = isRecencySensitiveQuery(searchQuery)
+        ? Math.min(baseRecencyDays, 21)
+        : baseRecencyDays;
+    const cacheKey = makeCacheKey(searchQuery, {
+        maxResults,
+        locale,
+        recencyDays,
+        trustedDomains,
+        excludeDomains,
+    });
+    const cached = getCachedSearch(cacheKey);
+    if (cached) {
+        console.log(`[SearchCache] hit for "${searchQuery}"`);
+        return cached.slice(0, maxResults);
+    }
+
     const timeout = setTimeout(() => { }, SEARCH_TIMEOUT_MS);
     try {
-        const providers = [
-            searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
-            searchDDGLiteProvider(searchQuery, maxResults * 2),
-            searchBingRssProvider(searchQuery, maxResults * 2),
-            searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-            searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-        ];
-
-        const settled = await Promise.allSettled(providers);
-        const raw = [];
         const providerSummary = {
             ddg_html: 0,
             ddg_lite: 0,
@@ -618,17 +694,50 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             wikipedia: 0,
             failed: 0,
         };
-        for (const result of settled) {
+        const raw = [];
+
+        const primaryProviders = [
+            searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
+            searchDDGLiteProvider(searchQuery, maxResults * 2),
+        ];
+        const primarySettled = await Promise.allSettled(primaryProviders);
+        for (const result of primarySettled) {
             if (result.status === 'fulfilled' && Array.isArray(result.value)) {
                 for (const item of result.value) {
                     const normalized = normalizeResult(item);
                     raw.push(normalized);
-                    if (providerSummary[normalized.sourceEngine] !== undefined) {
-                        providerSummary[normalized.sourceEngine] += 1;
-                    }
+                    if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
                 }
-            } else if (result.status === 'rejected') {
+            } else {
                 providerSummary.failed += 1;
+            }
+        }
+
+        const primaryRanked = dedupeAndScore(raw, {
+            recencyDays,
+            trustedDomains,
+            excludeDomains,
+            query: searchQuery,
+        });
+
+        const needsSecondary = primaryRanked.length < Math.max(4, maxResults);
+        if (needsSecondary) {
+            const secondaryProviders = [
+                searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
+                searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
+                ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
+            ];
+            const secondarySettled = await Promise.allSettled(secondaryProviders);
+            for (const result of secondarySettled) {
+                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                    for (const item of result.value) {
+                        const normalized = normalizeResult(item);
+                        raw.push(normalized);
+                        if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
+                    }
+                } else {
+                    providerSummary.failed += 1;
+                }
             }
         }
 
@@ -639,8 +748,9 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             query: searchQuery,
         });
         console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
-
-        return ranked.slice(0, maxResults);
+        const output = ranked.slice(0, maxResults);
+        setCachedSearch(cacheKey, output);
+        return output;
     } finally {
         clearTimeout(timeout);
     }

@@ -6,7 +6,7 @@ const API_IMAGE_URL = '/api/image';
 let conversationHistory = [];
 let isProcessing = false;
 let messagesContainer = null;
-let currentModel = 'openrouter/aurora-alpha'; // Default: Aurora Alpha
+let currentModel = 'openrouter::openrouter/aurora-alpha'; // Default: Aurora Alpha
 let currentChatId = null;
 let chatHistoryData = {};
 let abortController = null;
@@ -19,6 +19,7 @@ let searchEnabled = localStorage.getItem('searchEnabled') === 'true'; // Web sea
 let availableModels = [...models]; // Initialize with config models
 let pendingImages = []; // base64 data URLs for image attachments
 let pendingFiles = []; // PDF attachments as data URLs
+let realtimeSearchStatusText = '';
 let imageGenerationMode = false;
 let modelsMeta = null;
 let activeStreamContext = { searchEnabledAtRequest: false, canvasModeAtRequest: false };
@@ -61,6 +62,61 @@ ${supportPolicy}
 Output clean, complete, runnable code in a single fenced code block with a correct language tag. Keep explanation brief.`;
 }
 
+function normalizeModelEntry(model) {
+    const upstreamModelId = String(model?.upstreamModelId || model?.id || '').trim();
+    const provider = String(model?.provider || (String(model?.id || '').startsWith('groq::') ? 'groq' : 'openrouter')).toLowerCase();
+    const providerLabel = provider === 'groq' ? 'Groq' : 'OpenRouter';
+    const scopedId = String(model?.id || '').includes('::')
+        ? String(model.id)
+        : `${provider}::${upstreamModelId}`;
+
+    return {
+        ...model,
+        id: scopedId,
+        provider,
+        providerLabel: model?.providerLabel || providerLabel,
+        upstreamModelId,
+        capabilities: {
+            reasoning: Boolean(model?.capabilities?.reasoning ?? model?.supportsThinking),
+            visionInput: Boolean(model?.capabilities?.visionInput ?? model?.supportsVision),
+            imageOutput: Boolean(model?.capabilities?.imageOutput),
+            fileInputPdf: Boolean(model?.capabilities?.fileInputPdf),
+            textChat: Boolean(model?.capabilities?.textChat ?? true),
+            toolUse: Boolean(model?.capabilities?.toolUse),
+        },
+    };
+}
+
+function findModelByLegacyId(rawId) {
+    const target = String(rawId || '').trim();
+    if (!target) return null;
+
+    const openRouterPreferred = availableModels.find((model) =>
+        model.provider === 'openrouter' && model.upstreamModelId === target);
+    if (openRouterPreferred) return openRouterPreferred;
+
+    return availableModels.find((model) => model.upstreamModelId === target) || null;
+}
+
+function resolveStoredModelSelection(storedId) {
+    const saved = String(storedId || '').trim();
+    if (!saved) return null;
+
+    const exact = availableModels.find((model) => model.id === saved);
+    if (exact) return exact;
+
+    const legacy = findModelByLegacyId(saved);
+    if (legacy) return legacy;
+
+    return null;
+}
+
+function getModelDisplayName(model) {
+    if (!model) return 'Model';
+    if (!model.providerLabel) return model.name;
+    return `${model.name} (${model.providerLabel})`;
+}
+
 // Load dynamic models from API
 async function fetchModels() {
     try {
@@ -72,24 +128,16 @@ async function fetchModels() {
             updateModelFreshnessIndicator();
 
             if (dynamicModels && dynamicModels.length > 0) {
-                availableModels = dynamicModels.map((model) => ({
-                    ...model,
-                    capabilities: {
-                        reasoning: Boolean(model?.capabilities?.reasoning ?? model?.supportsThinking),
-                        visionInput: Boolean(model?.capabilities?.visionInput ?? model?.supportsVision),
-                        imageOutput: Boolean(model?.capabilities?.imageOutput),
-                        fileInputPdf: Boolean(model?.capabilities?.fileInputPdf),
-                        textChat: Boolean(model?.capabilities?.textChat ?? true),
-                    },
-                }));
+                availableModels = dynamicModels.map(normalizeModelEntry);
                 initializeModels();
 
                 // Restore saved model preference
                 const saved = localStorage.getItem('selectedModel');
-                const savedModelExists = saved && availableModels.find(m => m.id === saved);
+                const resolved = resolveStoredModelSelection(saved);
 
-                if (savedModelExists) {
-                    currentModel = saved;
+                if (resolved) {
+                    currentModel = resolved.id;
+                    saveSelectedModel();
                 }
                 if (!getCurrentModelData()) autoSwitchToSupportedModel(true);
                 updateHeaderModelDisplay();
@@ -116,7 +164,8 @@ function getCurrentModelData() {
 
 function pickPreferredSupportedModel() {
     if (!availableModels || availableModels.length === 0) return null;
-    const preferred = availableModels.find((model) => model.id === 'openrouter/aurora-alpha');
+    const preferred = availableModels.find((model) =>
+        model.provider === 'openrouter' && model.upstreamModelId === 'openrouter/aurora-alpha');
     if (preferred) return preferred;
     const textCapable = availableModels.find((model) => model?.capabilities?.textChat !== false);
     return textCapable || availableModels[0];
@@ -131,7 +180,7 @@ function autoSwitchToSupportedModel(notify = false) {
     updateHeaderModelDisplay();
     updateVisionUI();
     if (changed && notify) {
-        showToast(`Model unavailable. Switched to ${fallback.name}.`, 'warning');
+        showToast(`Model unavailable. Switched to ${getModelDisplayName(fallback)}.`, 'warning');
     }
     return true;
 }
@@ -151,8 +200,25 @@ function updateHeaderModelDisplay() {
         const badge = document.getElementById('modelBadge');
         const headerName = document.getElementById('headerModelName');
         if (badge) badge.textContent = savedModelData.badge;
-        if (headerName) headerName.textContent = savedModelData.name;
+        if (headerName) headerName.textContent = getModelDisplayName(savedModelData);
     }
+}
+
+function setSearchRealtimeStatus(text) {
+    realtimeSearchStatusText = String(text || '').trim();
+    const el = document.getElementById('searchRealtimeStatus');
+    if (!el) return;
+    if (!realtimeSearchStatusText) {
+        el.textContent = '';
+        el.style.display = 'none';
+        return;
+    }
+    el.textContent = realtimeSearchStatusText;
+    el.style.display = '';
+}
+
+function clearSearchRealtimeStatus() {
+    setSearchRealtimeStatus('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -163,8 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (availableModels.length > 0) {
         // Check local storage
         const saved = localStorage.getItem('selectedModel');
-        if (saved && availableModels.find(m => m.id === saved)) {
-            currentModel = saved;
+        const resolved = resolveStoredModelSelection(saved);
+        if (resolved) {
+            currentModel = resolved.id;
         } else {
             currentModel = availableModels[0].id;
             saveSelectedModel();
@@ -184,6 +251,14 @@ document.addEventListener('DOMContentLoaded', () => {
     preventBodyScroll();
     setupMobileKeyboard();
     updateSendButtonState();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('newChat') === '1') {
+        window.newChat();
+        params.delete('newChat');
+        const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, '', nextUrl);
+    }
 });
 
 function setupMobileKeyboard() {
@@ -333,7 +408,15 @@ function buildModelListHTML(filterQuery = '') {
     const query = filterQuery.toLowerCase();
 
     availableModels.forEach(model => {
-        if (query && !model.name.toLowerCase().includes(query) && !model.id.toLowerCase().includes(query)) return;
+        const providerLabel = String(model.providerLabel || '').toLowerCase();
+        const upstreamModelId = String(model.upstreamModelId || '').toLowerCase();
+        if (query
+            && !model.name.toLowerCase().includes(query)
+            && !model.id.toLowerCase().includes(query)
+            && !providerLabel.includes(query)
+            && !upstreamModelId.includes(query)) {
+            return;
+        }
         if (!categories[model.category]) categories[model.category] = [];
         categories[model.category].push(model);
     });
@@ -344,14 +427,19 @@ function buildModelListHTML(filterQuery = '') {
         categories[category].forEach(model => {
             const caps = model.capabilities || {};
             const tags = [];
+            if (model.providerLabel) tags.push(model.providerLabel);
             if (caps.reasoning) tags.push('Reasoning');
             if (caps.visionInput) tags.push('Vision');
             if (caps.imageOutput) tags.push('Image');
             if (caps.fileInputPdf) tags.push('PDF');
             const tagHtml = tags.length > 0
-                ? `<div class="model-capabilities">${tags.map((tag) => `<span class="model-cap-chip">${tag}</span>`).join('')}</div>`
+                ? `<div class="model-capabilities">${tags.map((tag) => {
+                    const isProviderTag = model.providerLabel && tag === model.providerLabel;
+                    return `<span class="model-cap-chip ${isProviderTag ? 'model-provider-chip' : ''}">${tag}</span>`;
+                }).join('')}</div>`
                 : '';
-            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${model.name}"><div class="model-info"><div class="model-name">${model.name}</div>${tagHtml}</div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+            const displayName = getModelDisplayName(model);
+            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${displayName}"><div class="model-info"><div class="model-name">${model.name}</div>${tagHtml}</div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
         });
     });
 
@@ -691,6 +779,7 @@ window.stopGeneration = function () {
     if (abortController) abortController.abort();
     removeTypingIndicator();
     cleanupStreamingUI();
+    clearSearchRealtimeStatus();
     isProcessing = false;
     updateSendButtonState();
 }
@@ -792,10 +881,19 @@ window.newChat = function () {
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     document.getElementById('scrollToBottom').classList.remove('show');
     if (window.innerWidth <= 768) window.closeSidebar();
+    clearSearchRealtimeStatus();
     // Reset temp chat state
     window.isTempChat = false;
     const tempBtn = document.getElementById('tempChatBtn');
     if (tempBtn) tempBtn.classList.remove('active');
+}
+
+window.handleNewChatAuxClick = function (event) {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    const url = new URL(window.location.href);
+    url.searchParams.set('newChat', '1');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
 }
 
 window.isTempChat = false;
@@ -822,6 +920,7 @@ window.toggleTempChat = function () {
         document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
         document.getElementById('scrollToBottom').classList.remove('show');
         if (window.innerWidth <= 768) window.closeSidebar();
+        clearSearchRealtimeStatus();
     } else {
         // Exiting temp chat â€” start a fresh regular chat
         conversationHistory = [];
@@ -835,6 +934,7 @@ window.toggleTempChat = function () {
         window.handleInput();
         document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
         document.getElementById('scrollToBottom').classList.remove('show');
+        clearSearchRealtimeStatus();
     }
 }
 
@@ -1408,6 +1508,11 @@ window.sendMessage = async function () {
     isProcessing = true;
     updateSendButtonState();
     showTypingIndicator();
+    if (searchEnabled) {
+        setSearchRealtimeStatus('Searching the web... 0.0s');
+    } else {
+        clearSearchRealtimeStatus();
+    }
 
     let assistantMessageContent = '';
     let messageGroup;
@@ -1486,6 +1591,7 @@ window.sendMessage = async function () {
         let reasoningContent = '';
         let fullAssistantContent = '';
         let searchSources = []; // Collected from SSE 'sources' event
+        let searchStatusPhase = '';
         let currentSSEEvent = ''; // Track custom SSE event types
 
         // --- Loop / repetition detection ---
@@ -1541,6 +1647,19 @@ window.sendMessage = async function () {
                         try {
                             const sources = JSON.parse(data);
                             if (Array.isArray(sources)) searchSources = sources;
+                        } catch { }
+                        currentSSEEvent = '';
+                        continue;
+                    }
+                    if (currentSSEEvent === 'search_status') {
+                        try {
+                            const status = JSON.parse(data);
+                            const elapsedSec = (Number(status?.elapsedMs || 0) / 1000).toFixed(1);
+                            const phase = status?.phase ? `[${status.phase}] ` : '';
+                            const tool = status?.tool ? ` (${status.tool})` : '';
+                            const msg = status?.message || 'Searching...';
+                            searchStatusPhase = String(status?.phase || '');
+                            setSearchRealtimeStatus(`${phase}${msg}${tool} • ${elapsedSec}s`);
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1680,6 +1799,12 @@ window.sendMessage = async function () {
             renderChatHistory();
         }
 
+        if (searchStatusPhase === 'error') {
+            setSearchRealtimeStatus('Search failed. Please retry.');
+        } else {
+            clearSearchRealtimeStatus();
+        }
+
         // Show loop detection warning if triggered
         if (loopDetected && messageGroup) {
             const warningEl = document.createElement('div');
@@ -1698,6 +1823,7 @@ window.sendMessage = async function () {
 
     } catch (error) {
         removeTypingIndicator();
+        clearSearchRealtimeStatus();
         if (error.name !== 'AbortError') {
             showToast('Error: ' + error.message, 'error');
             console.error('Error:', error);
@@ -1711,6 +1837,9 @@ window.sendMessage = async function () {
         shouldStopTyping = false;
         updateSendButtonState();
         abortController = null;
+        if (!realtimeSearchStatusText.toLowerCase().includes('failed')) {
+            clearSearchRealtimeStatus();
+        }
     }
 }
 

@@ -1,9 +1,10 @@
-const { getModelById } = require('./lib/openrouter-models');
-const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
-const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('./lib/tools');
+const { getModelById } = require('../lib/model-catalog');
+const { withOpenRouterFailover } = require('../lib/openrouter-key-pool');
+const { withGroqFailover } = require('../lib/groq-key-pool');
+const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('../lib/tools');
 
-const MAX_TOOL_ROUNDS = 6;
-const MAX_TOOL_CALLS_TOTAL = 6;
+const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_CALLS_TOTAL = 4;
 const MAX_TOOL_CALLS_PER_TOOL = {
     search_web: 4,
     fetch_url: 3,
@@ -11,7 +12,7 @@ const MAX_TOOL_CALLS_PER_TOOL = {
     execute_code: 2,
     get_current_datetime: 1,
 };
-const MAX_AGENT_WALL_TIME_MS = 25_000;
+const MAX_AGENT_WALL_TIME_MS = 18_000;
 
 async function pipeStream(readable, writable) {
     const reader = readable.getReader();
@@ -135,10 +136,44 @@ function ensureCitationGuard(answerText, sources) {
     return `${answerText}\n\nConfidence note: Evidence coverage is limited for some claims. Please verify critical facts directly from the cited sources.`;
 }
 
-async function runOpenRouterCompletion(request, model, messages, { tools = null, stream = false, maxTokens = 4096 } = {}) {
+async function runProviderCompletion(request, modelInfo, messages, { tools = null, stream = false, maxTokens = 4096 } = {}) {
     const referer = request.headers.origin || 'http://localhost:3000';
-    const failoverResult = await withOpenRouterFailover({
-        modelId: model,
+    const provider = String(modelInfo?.provider || '').toLowerCase();
+    const upstreamModelId = String(modelInfo?.upstreamModelId || modelInfo?.id || '').trim();
+
+    if (!provider || !upstreamModelId) {
+        return {
+            ok: false,
+            attempts: [],
+            lastFailure: {
+                type: 'config',
+                message: 'Model provider configuration is invalid.',
+            },
+        };
+    }
+
+    if (provider === 'groq') {
+        return withGroqFailover({
+            modelId: upstreamModelId,
+            requestFactory: ({ apiKey }) => fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: upstreamModelId,
+                    messages,
+                    tools: tools || undefined,
+                    max_tokens: maxTokens,
+                    stream,
+                }),
+            }),
+        });
+    }
+
+    return withOpenRouterFailover({
+        modelId: upstreamModelId,
         requestFactory: ({ apiKey }) => fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -148,7 +183,7 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
                 'X-Title': 'ChaqGPT',
             },
             body: JSON.stringify({
-                model,
+                model: upstreamModelId,
                 messages,
                 tools: tools || undefined,
                 max_tokens: maxTokens,
@@ -156,11 +191,38 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
             }),
         }),
     });
-    return failoverResult;
 }
 
-async function forceTextCompletion(request, model, messages, options = {}) {
-    const result = await runOpenRouterCompletion(request, model, messages, {
+function flattenUserContent(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+        .filter((p) => p?.type === 'text')
+        .map((p) => String(p.text || ''))
+        .join(' ');
+}
+
+function isEvidenceSensitiveQuery(text) {
+    return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm|model comparison)\b/i
+        .test(String(text || ''));
+}
+
+function hasNumericClaims(text) {
+    return /\b\d+([.,]\d+)?\b/.test(String(text || ''));
+}
+
+function isSimpleFactQuery(text) {
+    const q = String(text || '').trim().toLowerCase();
+    if (!q || q.length > 120) return false;
+    if (/^(who is|what is|when is|where is|who was|what was)\b/.test(q) && q.split(/\s+/).length <= 12) {
+        return true;
+    }
+    if (/\bpresident of the (us|usa|united states)\b/.test(q)) return true;
+    return false;
+}
+
+async function forceTextCompletion(request, modelInfo, messages, options = {}) {
+    const result = await runProviderCompletion(request, modelInfo, messages, {
         stream: false,
         maxTokens: Number(options.maxTokens) || 3072,
     });
@@ -196,7 +258,7 @@ function structuredMetricLog(data) {
     console.log(`[AgenticMetrics] ${JSON.stringify(data)}`);
 }
 
-async function agenticLoop(request, model, messages) {
+async function agenticLoop(request, modelInfo, messages, { onProgress } = {}) {
     const today = new Date().toISOString().split('T')[0];
     const deadline = Date.now() + MAX_AGENT_WALL_TIME_MS;
     let totalToolCalls = 0;
@@ -210,6 +272,12 @@ async function agenticLoop(request, model, messages) {
         high_trust_sources_count: 0,
     };
 
+    const userQuestion = flattenUserContent(getLastUserMessageContent(messages));
+    const strictEvidenceRequired = isEvidenceSensitiveQuery(userQuestion);
+    const report = (payload) => {
+        if (typeof onProgress === 'function') onProgress(payload);
+    };
+
     let currentMessages = [
         {
             role: 'system',
@@ -217,18 +285,20 @@ async function agenticLoop(request, model, messages) {
                 `You are an evidence-first assistant with access to web tools. Today's date is ${today}.\n` +
                 `Tool limits are strict: max ${MAX_TOOL_CALLS_TOTAL} total calls, and per-tool limits apply.\n` +
                 `Prioritize high-trust and recent sources, cite URLs inline as [Title](URL), and clearly flag uncertainty when evidence is weak.\n` +
-                `Use execute_code only when computation materially increases correctness.`,
+                `Use execute_code only when computation materially increases correctness.\n` +
+                `For fast-changing topics (benchmarks, rankings, prices, releases), do not provide exact numbers without source-backed citations.`,
         },
         ...messages,
     ];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        report({ phase: 'round', message: `Agent round ${round + 1}/${MAX_TOOL_ROUNDS}` });
         if (Date.now() > deadline) {
             metrics.tool_error_count += 1;
             break;
         }
 
-        const callResult = await runOpenRouterCompletion(request, model, currentMessages, {
+        const callResult = await runProviderCompletion(request, modelInfo, currentMessages, {
             tools: TOOL_DEFINITIONS,
             stream: false,
             maxTokens: 3072,
@@ -256,9 +326,25 @@ async function agenticLoop(request, model, messages) {
         if (toolCalls.length === 0) {
             const answer = ensureCitationGuard(String(message.content || '').trim(), [...sourceMap.values()]);
             if (answer) {
+                const coverage = citationCoverageRatio(answer, [...sourceMap.values()]);
+                const weakEvidenceForNumeric =
+                    strictEvidenceRequired &&
+                    hasNumericClaims(answer) &&
+                    coverage < 0.25;
+
+                if (weakEvidenceForNumeric && round < (MAX_TOOL_ROUNDS - 1)) {
+                    currentMessages.push({
+                        role: 'system',
+                        content:
+                            'Your previous answer had numeric claims with weak citations. ' +
+                            'Run another search using current-year keywords, read at least one primary source with fetch_url, then answer with citations.',
+                    });
+                    continue;
+                }
+
                 metrics.sources_count = sourceMap.size;
                 metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
-                metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
+                metrics.citation_coverage_ratio = coverage;
                 structuredMetricLog(metrics);
                 return { ok: true, answer, sources: [...sourceMap.values()], metrics };
             }
@@ -270,6 +356,7 @@ async function agenticLoop(request, model, messages) {
         for (const toolCall of toolCalls) {
             const toolName = toolCall.function?.name;
             const toolArgs = toolCall.function?.arguments;
+            report({ phase: 'tool_start', tool: toolName, message: `Running ${toolName}...` });
 
             const existing = perToolCalls.get(toolName) || 0;
             const cap = MAX_TOOL_CALLS_PER_TOOL[toolName] || 1;
@@ -341,6 +428,7 @@ async function agenticLoop(request, model, messages) {
                 tool_call_id: toolCall.id,
                 content: toolResultText,
             });
+            report({ phase: 'tool_done', tool: toolName, message: `${toolName} completed` });
         }
     }
 
@@ -354,14 +442,24 @@ async function agenticLoop(request, model, messages) {
         },
     ];
 
-    const forcedAnswerRaw = await forceTextCompletion(request, model, forcedMessages, { maxTokens: 3072 });
+    const forcedAnswerRaw = await forceTextCompletion(request, modelInfo, forcedMessages, { maxTokens: 3072 });
     if (forcedAnswerRaw) {
         const answer = ensureCitationGuard(forcedAnswerRaw, [...sourceMap.values()]);
-        metrics.sources_count = sourceMap.size;
-        metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
-        metrics.citation_coverage_ratio = citationCoverageRatio(answer, [...sourceMap.values()]);
-        structuredMetricLog(metrics);
-        return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        const coverage = citationCoverageRatio(answer, [...sourceMap.values()]);
+        const weakEvidenceForNumeric =
+            strictEvidenceRequired &&
+            hasNumericClaims(answer) &&
+            coverage < 0.25;
+
+        if (!weakEvidenceForNumeric) {
+            metrics.sources_count = sourceMap.size;
+            metrics.high_trust_sources_count = [...sourceMap.values()].filter((s) => Number(s.trustScore || 0) >= 0.8 || s.evidenceQuality === 'high').length;
+            metrics.citation_coverage_ratio = coverage;
+            structuredMetricLog(metrics);
+            return { ok: true, answer, sources: [...sourceMap.values()], metrics };
+        }
+
+        metrics.tool_error_count += 1;
     }
 
     const lastUserContent = getLastUserMessageContent(messages);
@@ -375,7 +473,7 @@ async function agenticLoop(request, model, messages) {
                 content: 'Write a concise, factual answer with inline citations. Do not list raw search snippets.',
             },
         ];
-        const contextAnswer = await forceTextCompletion(request, model, contextMessages, { maxTokens: 2048 });
+        const contextAnswer = await forceTextCompletion(request, modelInfo, contextMessages, { maxTokens: 2048 });
         if (contextAnswer) {
             for (const src of contextFallback.sources || []) addSource(sourceMap, src);
             const answer = ensureCitationGuard(contextAnswer, [...sourceMap.values()]);
@@ -429,20 +527,40 @@ module.exports = async function handler(request, response) {
 
         if (searchEnabled) {
             const supportsTools = Boolean(modelInfo.capabilities.toolUse);
-            if (supportsTools) {
-                const result = await agenticLoop(request, model, messages);
+            const lastUserContent = getLastUserMessageContent(messages);
+            const userQuestion = flattenUserContent(lastUserContent);
+            const quickPath = isSimpleFactQuery(userQuestion);
+            const searchStartTs = Date.now();
+            const emitProgress = (payload = {}) => {
+                sendSSEEvent(response, 'search_status', {
+                    elapsedMs: Date.now() - searchStartTs,
+                    ...payload,
+                });
+            };
+
+            startSSEStream(response);
+            emitProgress({
+                phase: 'start',
+                message: quickPath ? 'Starting quick search path...' : 'Starting agentic search...',
+            });
+
+            if (supportsTools && !quickPath) {
+                const result = await agenticLoop(request, modelInfo, messages, {
+                    onProgress: emitProgress,
+                });
                 if (result.ok) {
-                    startSSEStream(response);
                     if (result.sources?.length > 0) {
                         sendSSEEvent(response, 'sources', result.sources);
                     }
                     sendSSEEvent(response, 'quality_metrics', result.metrics || {});
+                    emitProgress({ phase: 'complete', message: 'Search complete' });
                     streamTextAsSSE(response, result.answer);
                     return;
                 }
+                emitProgress({ phase: 'fallback', message: 'Falling back to context mode...' });
             }
 
-            const lastUserContent = getLastUserMessageContent(messages);
+            emitProgress({ phase: 'searching', message: 'Building search context...' });
             const searchResult = await buildSearchContext(lastUserContent);
 
             let enhancedMessages = [...messages];
@@ -452,17 +570,17 @@ module.exports = async function handler(request, response) {
                 searchSources = searchResult.sources || [];
             }
 
-            const failoverResult = await runOpenRouterCompletion(request, model, enhancedMessages, { stream: true });
-            if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
+            emitProgress({ phase: 'model', message: 'Generating final answer...' });
+            const failoverResult = await runProviderCompletion(request, modelInfo, enhancedMessages, { stream: true });
+            if (!failoverResult.ok) return handleFailoverError(response, failoverResult, modelInfo.providerLabel);
 
-            startSSEStream(response);
             if (searchSources.length > 0) sendSSEEvent(response, 'sources', searchSources);
             await pipeStream(failoverResult.response.body, response);
             return;
         }
 
-        const failoverResult = await runOpenRouterCompletion(request, model, messages, { stream: true });
-        if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
+        const failoverResult = await runProviderCompletion(request, modelInfo, messages, { stream: true });
+        if (!failoverResult.ok) return handleFailoverError(response, failoverResult, modelInfo.providerLabel);
 
         startSSEStream(response);
         await pipeStream(failoverResult.response.body, response);
@@ -474,16 +592,30 @@ module.exports = async function handler(request, response) {
     }
 };
 
-function handleFailoverError(response, failoverResult) {
+function handleFailoverError(response, failoverResult, providerLabel = null) {
+    const provider = providerLabel || failoverResult.provider || 'Provider';
+    if (response.headersSent) {
+        const message = failoverResult.lastFailure?.errorText
+            ? String(failoverResult.lastFailure.errorText).slice(0, 500)
+            : 'All upstream keys failed.';
+        sendSSEEvent(response, 'search_status', {
+            phase: 'error',
+            message,
+        });
+        response.write('data: [DONE]\n\n');
+        response.end();
+        return;
+    }
+
     if (failoverResult.lastFailure?.type === 'config') {
-        return response.status(500).json({ error: 'API key not configured.' });
+        return response.status(500).json({ error: `${provider} API key not configured.` });
     }
     if (failoverResult.lastFailure?.type === 'response') {
         const errorData = parseErrorText(failoverResult.lastFailure.errorText);
         return response.status(failoverResult.lastFailure.status || 502).json(errorData);
     }
     return response.status(502).json({
-        error: 'All OpenRouter keys failed due to network/upstream issues.',
+        error: `All ${provider} keys failed due to network/upstream issues.`,
         attempts: failoverResult.attempts?.length || 0,
     });
 }

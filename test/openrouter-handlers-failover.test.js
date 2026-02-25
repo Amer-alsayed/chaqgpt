@@ -1,12 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const pool = require('../api/lib/openrouter-key-pool');
-const modelsLib = require('../api/lib/openrouter-models');
+const pool = require('../lib/openrouter-key-pool');
+const modelCatalog = require('../lib/model-catalog');
 
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_FETCH = global.fetch;
-const REAL_GET_MODEL_BY_ID = modelsLib.getModelById;
+const REAL_GET_MODEL_BY_ID = modelCatalog.getModelById;
 
 function restoreEnv() {
     for (const key of Object.keys(process.env)) {
@@ -50,14 +50,17 @@ test.afterEach(() => {
     pool.__resetForTests();
     restoreEnv();
     global.fetch = ORIGINAL_FETCH;
-    modelsLib.getModelById = REAL_GET_MODEL_BY_ID;
+    modelCatalog.getModelById = REAL_GET_MODEL_BY_ID;
 });
 
 test('chat handler fails over from 429 key to healthy key and streams response', async () => {
     process.env.OPENROUTER_API_KEYS_JSON = '["key-1","key-2"]';
     delete require.cache[require.resolve('../api/chat')];
 
-    modelsLib.getModelById = async () => ({
+    modelCatalog.getModelById = async () => ({
+        provider: 'openrouter',
+        providerLabel: 'OpenRouter',
+        upstreamModelId: 'fake-model',
         capabilities: { visionInput: true, fileInputPdf: true },
     });
 
@@ -96,7 +99,10 @@ test('chat handler agentic mode uses failover when search is enabled', async () 
     process.env.OPENROUTER_API_KEYS_JSON = '["key-a","key-b"]';
     delete require.cache[require.resolve('../api/chat')];
 
-    modelsLib.getModelById = async () => ({
+    modelCatalog.getModelById = async () => ({
+        provider: 'openrouter',
+        providerLabel: 'OpenRouter',
+        upstreamModelId: 'fake-model',
         capabilities: { visionInput: true, fileInputPdf: true, toolUse: true },
     });
 
@@ -137,7 +143,10 @@ test('image handler fails over after upstream failure and returns image payload'
     process.env.OPENROUTER_API_KEYS_JSON = '["img-1","img-2","img-3"]';
     delete require.cache[require.resolve('../api/image')];
 
-    modelsLib.getModelById = async () => ({
+    modelCatalog.getModelById = async () => ({
+        provider: 'openrouter',
+        providerLabel: 'OpenRouter',
+        upstreamModelId: 'fake-image-model',
         capabilities: { imageOutput: true },
     });
 

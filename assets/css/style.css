@@ -418,6 +418,12 @@ body.light-theme .sidebar::after {
     padding: 1px 6px;
 }
 
+.model-provider-chip {
+    color: var(--accent-primary);
+    border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border-interactive));
+    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
 .model-description {
     font-size: 12px;
     color: var(--text-secondary);
@@ -1752,6 +1758,7 @@ body.light-theme .rail-btn {
 }
 
 @keyframes responseBars {
+
     0%,
     100% {
         transform: scaleY(0.4);
@@ -5081,3 +5088,12 @@ body.light-theme .message-input {
 }
 
 
+.search-realtime-status {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary, #9ca3af);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
