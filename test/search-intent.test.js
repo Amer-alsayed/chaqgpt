@@ -18,6 +18,13 @@ test('current office query profile enables official domains', () => {
     assert.ok(profile.domainSeedQueries.some((q) => q.includes('site:whitehouse.gov')));
 });
 
+test('product specs query profile enables device-spec trusted domains', () => {
+    const profile = tools.__test.buildSearchProfile('iphone 17 pro specs');
+    assert.equal(profile.intent, 'product_specs');
+    assert.ok(profile.trustedDomains.includes('apple.com'));
+    assert.ok(profile.domainSeedQueries.some((q) => q.includes('site:gsmarena.com')));
+});
+
 test('decomposeSearchQueries expands benchmark intents with focused queries', () => {
     const queries = tools.__test.decomposeSearchQueries('latest ai model benchmarks');
     assert.ok(queries.length >= 4);
@@ -110,4 +117,43 @@ test('dedupeAndScore filters benchmark-unrelated support pages for AI benchmark 
     assert.ok(ranked.length >= 1);
     assert.equal(ranked[0].domain, 'paperswithcode.com');
     assert.equal(ranked.some((item) => item.url.includes('support.google.com')), false);
+});
+
+test('dedupeAndScore filters unrelated product-family pages for product specs intent', () => {
+    const ranked = searchModule.__test.dedupeAndScore([
+        {
+            title: 'iPhone 17 Pro technical specifications',
+            url: 'https://www.apple.com/iphone-17-pro/specs/',
+            snippet: 'Full technical specifications for iPhone 17 Pro.',
+            sourceEngine: 'ddg_html',
+            domain: 'apple.com',
+            publishedAt: '2026-01-10',
+        },
+        {
+            title: 'MacBook Pro',
+            url: 'https://en.wikipedia.org/wiki/MacBook_Pro',
+            snippet: 'Laptop line from Apple.',
+            sourceEngine: 'wikipedia',
+            domain: 'wikipedia.org',
+            publishedAt: null,
+        },
+        {
+            title: 'iPhone 15 Pro',
+            url: 'https://en.wikipedia.org/wiki/IPhone_15_Pro',
+            snippet: 'Smartphone generation with A17 Pro.',
+            sourceEngine: 'wikipedia',
+            domain: 'wikipedia.org',
+            publishedAt: null,
+        },
+    ], {
+        query: 'iphone 17 pro specs',
+        recencyDays: 120,
+        trustedDomains: [],
+        excludeDomains: [],
+    });
+
+    assert.ok(ranked.length >= 1);
+    assert.equal(ranked[0].domain, 'apple.com');
+    assert.equal(ranked.some((item) => item.url.includes('MacBook_Pro')), false);
+    assert.equal(ranked.some((item) => item.url.includes('IPhone_15_Pro')), false);
 });

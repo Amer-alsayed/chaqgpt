@@ -62,6 +62,20 @@ const AI_BENCHMARK_DOMAINS = new Set([
     'github.com',
 ]);
 
+const PRODUCT_SPECS_DOMAINS = new Set([
+    'apple.com',
+    'gsmarena.com',
+    'phonearena.com',
+    'kimovil.com',
+    'notebookcheck.net',
+    '91mobiles.com',
+    'smartprix.com',
+    'nanoreview.net',
+    'theverge.com',
+    'tomsguide.com',
+    'cnet.com',
+]);
+
 const CURRENT_OFFICE_DOMAINS = new Set([
     'whitehouse.gov',
     'usa.gov',
@@ -115,6 +129,22 @@ const QUERY_NOISE_TOKENS = new Set([
     'please',
     'help',
     'how',
+]);
+const PRODUCT_TOKEN_HINTS = new Set([
+    'iphone', 'ipad', 'macbook', 'imac', 'watch', 'airpods',
+    'galaxy', 'pixel', 'xiaomi', 'oneplus', 'huawei', 'sony',
+    'surface', 'thinkpad', 'phone', 'smartphone', 'laptop',
+]);
+const PRODUCT_SPEC_TOKENS = new Set([
+    'spec', 'specs', 'specification', 'specifications', 'features',
+    'camera', 'battery', 'ram', 'storage', 'display', 'chip', 'soc',
+    'processor', 'weight', 'dimensions', 'screen', 'refresh', 'nits',
+    'zoom', 'charge', 'charging', 'size',
+]);
+const PRODUCT_BRAND_TOKENS = new Set([
+    'iphone', 'ipad', 'macbook', 'imac', 'galaxy', 'pixel', 'xiaomi',
+    'oneplus', 'huawei', 'sony', 'surface', 'thinkpad', 'motorola',
+    'nokia',
 ]);
 
 function sanitizeSearchQuery(input) {
@@ -170,7 +200,7 @@ function setCachedSearch(key, results) {
 
 function shouldUseBingRss(query) {
     const q = String(query || '');
-    if (isAIBenchmarkQuery(q)) return false;
+    if (isAIBenchmarkQuery(q) || isProductSpecsQuery(q)) return false;
     return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(q)
         || isCurrentOfficeQuery(q);
 }
@@ -192,6 +222,14 @@ function isAIBenchmarkQuery(query) {
     const q = String(query || '').toLowerCase();
     return /\b(ai|llm|language model|models|gpt|claude|gemini|benchmark|benchmarks|leaderboard|ranking|sota|state of the art|mmlu|gpqa|livebench|swe-bench|arena)\b/
         .test(q);
+}
+
+function isProductSpecsQuery(query) {
+    const q = String(query || '').toLowerCase();
+    const hasSpecsIntent = /\b(spec|specs|specification|specifications|features|camera|battery|ram|storage|dimensions|weight|display|chip|soc)\b/.test(q);
+    const hasProductHint = [...PRODUCT_TOKEN_HINTS].some((token) => q.includes(token));
+    if (hasSpecsIntent && hasProductHint) return true;
+    return hasProductHint && /\b\d{1,3}\b/.test(q) && /\b(pro|max|ultra|plus|mini|se)\b/.test(q);
 }
 
 function ensureRecencyHint(query) {
@@ -353,6 +391,7 @@ function trustScore(result, trustedDomains = [], highStakes = false, query = '')
     if (!domain) return 0.2;
     if (trustedDomains.includes(domain)) return 1;
     if (isAIBenchmarkQuery(query) && AI_BENCHMARK_DOMAINS.has(domain)) return 0.96;
+    if (isProductSpecsQuery(query) && PRODUCT_SPECS_DOMAINS.has(domain)) return 0.95;
     if (isCurrentOfficeQuery(query) && CURRENT_OFFICE_DOMAINS.has(domain)) return 0.97;
     if (domain === 'wikipedia.org') return 0.78;
     if (HIGH_TRUST_DOMAINS.has(domain)) return 0.92;
@@ -386,6 +425,10 @@ function hasModelSignals(text) {
     return /\b(ai|llm|language model|model|gpt|claude|gemini|llama|mistral|qwen|deepseek|mixtral)\b/.test(String(text || '').toLowerCase());
 }
 
+function hasSpecsSignals(text) {
+    return /\b(spec|specs|specification|specifications|technical|camera|battery|ram|storage|display|chip|soc|weight|dimensions)\b/.test(String(text || '').toLowerCase());
+}
+
 function isLikelySearchNoise(result, query) {
     const domain = String(result.domain || '').toLowerCase();
     const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
@@ -414,6 +457,34 @@ function extractQueryTokens(query) {
         .filter((token) => token.length >= 3 && !QUERY_NOISE_TOKENS.has(token));
 }
 
+function extractEntityTokens(query) {
+    const tokens = extractQueryTokens(query);
+    return tokens.filter((token) => !PRODUCT_SPEC_TOKENS.has(token));
+}
+
+function findBrandToken(tokens) {
+    for (const token of tokens) {
+        if (PRODUCT_BRAND_TOKENS.has(token)) return token;
+    }
+    return '';
+}
+
+function isSpecsRelevantResult(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    const text = `${result.title || ''} ${result.snippet || ''} ${domain}`.toLowerCase();
+    const entityTokens = extractEntityTokens(query);
+    const brandToken = findBrandToken(entityTokens);
+    const numberTokens = entityTokens.filter((token) => /^\d{1,3}$/.test(token));
+
+    if (brandToken && !text.includes(brandToken)) return false;
+    if (numberTokens.length > 0 && !numberTokens.some((token) => text.includes(token))) return false;
+    if (entityTokens.length > 0 && !entityTokens.some((token) => text.includes(token))) return false;
+
+    if (PRODUCT_SPECS_DOMAINS.has(domain)) return true;
+    if (domain === 'wikipedia.org') return hasSpecsSignals(text) && Boolean(brandToken || numberTokens.length > 0);
+    return hasSpecsSignals(text);
+}
+
 function isBenchmarkRelevantResult(result, query) {
     const domain = String(result.domain || '').toLowerCase();
     if (AI_BENCHMARK_DOMAINS.has(domain)) return true;
@@ -433,6 +504,7 @@ function applyQueryIntentAdjustment(result, query) {
     if (wantsSpecs) {
         if (/\b(spec|specification|full phone specs|datasheet)\b/.test(text)) delta += 0.12;
         if (/(gsmarena\.com|phonearena\.com|kimovil\.com|notebookcheck\.net|91mobiles\.com|smartprix\.com|nanoreview\.net)/.test(domain)) delta += 0.15;
+        if (domain === 'apple.com') delta += 0.2;
         if (/(community|forum|support|thread|help|discussion)/.test(text) || /(community\.)/.test(domain)) delta -= 0.15;
         if (domain === 'wikipedia.org') delta -= 0.12;
     }
@@ -702,6 +774,7 @@ function dedupeAndScore(rawResults, options) {
 
     const highStakes = isHighStakesQuery(query);
     const recencySensitive = isRecencySensitiveQuery(query);
+    const productSpecs = isProductSpecsQuery(query);
     const seen = new Map();
     const agreementMap = new Map();
 
@@ -722,9 +795,10 @@ function dedupeAndScore(rawResults, options) {
     for (const result of seen.values()) {
         if (isLikelySearchNoise(result, query)) continue;
         if (isAIBenchmarkQuery(query) && !isBenchmarkRelevantResult(result, query)) continue;
+        if (productSpecs && !isSpecsRelevantResult(result, query)) continue;
 
         const relevance = queryRelevanceScore(result, query);
-        if (relevance <= 0 && !String(result.domain || '').endsWith('.gov')) {
+        if ((relevance <= 0 && !String(result.domain || '').endsWith('.gov')) || (productSpecs && relevance < 0.15)) {
             continue;
         }
 
@@ -836,6 +910,10 @@ function shouldRunRescuePass(ranked, query, maxResults, trustedDomains = []) {
         const trustedHits = top.filter((r) => trustedDomains.includes(r.domain) || Number(r.trustScore || 0) >= 0.88).length;
         if (benchmarkCount < 1 || trustedHits < 2) return true;
     }
+    if (isProductSpecsQuery(query)) {
+        const specsCount = top.filter((r) => PRODUCT_SPECS_DOMAINS.has(r.domain)).length;
+        if (specsCount < 1) return true;
+    }
 
     return false;
 }
@@ -864,6 +942,13 @@ function buildRescueQueries(query) {
             `site:lmarena.ai llm leaderboard`,
             `site:huggingface.co open llm leaderboard`,
             `${q} llm benchmark leaderboard ${year}`,
+        ];
+    }
+    if (isProductSpecsQuery(q)) {
+        queries = [
+            `site:apple.com ${q} technical specifications`,
+            `site:gsmarena.com ${q} specs`,
+            `${q} full specifications`,
         ];
     }
 
@@ -911,6 +996,7 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
     };
     const raw = [];
     const aiBenchmark = isAIBenchmarkQuery(searchQuery);
+    const productSpecs = isProductSpecsQuery(searchQuery);
     const primaryProviders = [
         searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
         searchDDGLiteProvider(searchQuery, maxResults * 2),
@@ -934,11 +1020,12 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
     )).length;
     const needsSecondary = primaryRanked.length < Math.max(4, maxResults)
         || (currentOffice && trustedPrimaryCount < 2)
-        || (aiBenchmark && benchmarkPrimaryCount < 2);
+        || (aiBenchmark && benchmarkPrimaryCount < 2)
+        || (productSpecs && primaryRanked.length < Math.max(3, maxResults));
     if (needsSecondary) {
         const secondaryProviders = [
-            searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-            ...(!aiBenchmark ? [searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+            ...(!productSpecs ? [searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+            ...(!aiBenchmark && !productSpecs ? [searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
             ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
         ];
         const secondarySettled = await Promise.allSettled(secondaryProviders);
@@ -959,8 +1046,8 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             rescueTasks.push(
                 searchDDGHtmlProvider(rescueQuery, maxResults * 2, locale),
                 searchDDGLiteProvider(rescueQuery, maxResults * 2),
-                searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                ...((shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery)) && !aiBenchmark
+                ...(!productSpecs ? [searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+                ...((shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery)) && !aiBenchmark && !productSpecs
                     ? [searchBingRssProvider(rescueQuery, maxResults * 2)]
                     : []),
             );
@@ -1036,4 +1123,6 @@ module.exports.__test = {
     parseDuckDuckGoHTML,
     parseDuckDuckGoLiteHTML,
     parseRssItems,
+    isProductSpecsQuery,
+    isSpecsRelevantResult,
 };
