@@ -38,8 +38,40 @@ const HIGH_TRUST_DOMAINS = new Set([
     'nature.com',
     'science.org',
     'github.com',
+    'paperswithcode.com',
+    'huggingface.co',
+    'lmarena.ai',
+    'artificialanalysis.ai',
+    'deepmind.google',
+    'anthropic.com',
     'edu',
     'gov',
+]);
+
+const AI_BENCHMARK_DOMAINS = new Set([
+    'paperswithcode.com',
+    'huggingface.co',
+    'lmarena.ai',
+    'artificialanalysis.ai',
+    'epoch.ai',
+    'openai.com',
+    'anthropic.com',
+    'deepmind.google',
+    'meta.com',
+    'google.com',
+    'arxiv.org',
+    'github.com',
+]);
+
+const GENERIC_NEWS_DOMAINS = new Set([
+    'apnews.com',
+    'reuters.com',
+    'cbsnews.com',
+    'nbcnews.com',
+    'abcnews.go.com',
+    'go.com',
+    'usatoday.com',
+    'newsweek.com',
 ]);
 
 const PROVIDER_WEIGHTS = {
@@ -116,6 +148,12 @@ function shouldUseBingRss(query) {
 function isRecencySensitiveQuery(query) {
     return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm)\b/i
         .test(String(query || ''));
+}
+
+function isAIBenchmarkQuery(query) {
+    const q = String(query || '').toLowerCase();
+    return /\b(ai|llm|language model|models|gpt|claude|gemini|benchmark|benchmarks|leaderboard|ranking|sota|state of the art|mmlu|gpqa|livebench|swe-bench|arena)\b/
+        .test(q);
 }
 
 function ensureRecencyHint(query) {
@@ -272,10 +310,11 @@ function freshnessScore(result, recencyDays, query = '') {
     return 0.25;
 }
 
-function trustScore(result, trustedDomains = [], highStakes = false) {
+function trustScore(result, trustedDomains = [], highStakes = false, query = '') {
     const domain = result.domain || getDomainFromUrl(result.url);
     if (!domain) return 0.2;
     if (trustedDomains.includes(domain)) return 1;
+    if (isAIBenchmarkQuery(query) && AI_BENCHMARK_DOMAINS.has(domain)) return 0.96;
     if (domain === 'wikipedia.org') return 0.78;
     if (HIGH_TRUST_DOMAINS.has(domain)) return 0.92;
     if (domain.endsWith('.gov') || domain.endsWith('.edu')) return 0.9;
@@ -320,6 +359,14 @@ function applyQueryIntentAdjustment(result, query) {
     if (wantsCurrentOffice) {
         if (domain.endsWith('.gov') || domain.includes('whitehouse.gov') || domain.includes('usa.gov')) delta += 0.09;
         if (domain === 'wikipedia.org') delta -= 0.03;
+    }
+
+    const wantsAIBenchmark = isAIBenchmarkQuery(q);
+    if (wantsAIBenchmark) {
+        const benchmarkSignals = /\b(leaderboard|benchmark|evaluation|eval|mmlu|gpqa|livebench|swe-bench|arena|score|ranking)\b/.test(text);
+        if (AI_BENCHMARK_DOMAINS.has(domain)) delta += 0.22;
+        if (benchmarkSignals) delta += 0.14;
+        if (GENERIC_NEWS_DOMAINS.has(domain) && !benchmarkSignals) delta -= 0.2;
     }
 
     return delta;
@@ -589,7 +636,7 @@ function dedupeAndScore(rawResults, options) {
             continue;
         }
 
-        const domainTrust = trustScore(result, trustedDomains, highStakes);
+        const domainTrust = trustScore(result, trustedDomains, highStakes, query);
         const freshness = freshnessScore(result, recencyDays, query);
         const specificity = specificityScore(result);
         const providerWeight = PROVIDER_WEIGHTS[result.sourceEngine] || 0.1;
