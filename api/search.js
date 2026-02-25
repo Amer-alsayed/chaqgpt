@@ -2,6 +2,12 @@
  * /api/search — Free web search with provider abstraction, ranking, and trust signals.
  */
 
+const { buildQueryPlan } = require('../lib/search/query-plan');
+const { runRetrievalOrchestrator } = require('../lib/search/retrieval-orchestrator');
+const { scoreAndRankCandidates } = require('../lib/search/relevance-scorer');
+const { rerankSearchResults } = require('../lib/search/llm-reranker');
+const { computeSearchConfidence } = require('../lib/search/confidence');
+
 const MAX_RESULTS_DEFAULT = 5;
 const MAX_RESULTS_LIMIT = 10;
 const PROVIDER_TIMEOUT_MS = 2_800;
@@ -955,7 +961,7 @@ function buildRescueQueries(query) {
     return [...new Set(queries.map((item) => item.trim()).filter(Boolean))].slice(0, 3);
 }
 
-async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
+async function searchDuckDuckGoLegacy(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
     const options = typeof optionsOrMaxResults === 'number'
         ? { maxResults: optionsOrMaxResults }
         : (optionsOrMaxResults || {});
@@ -1062,10 +1068,143 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         });
     }
 
-    console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
+    console.log(`[SearchProvidersLegacy] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
     const output = ranked.slice(0, maxResults);
     setCachedSearch(cacheKey, output);
     return output;
+}
+
+function isSearchPipelineV2Enabled() {
+    return String(process.env.SEARCH_PIPELINE_V2 || 'true').toLowerCase() !== 'false';
+}
+
+function buildProviderRegistry() {
+    return {
+        ddg_html: async ({ query, maxResults, locale }) => searchDDGHtmlProvider(query, maxResults, locale),
+        ddg_lite: async ({ query, maxResults }) => searchDDGLiteProvider(query, maxResults),
+        ddg_instant: async ({ query, maxResults }) => searchDDGInstantProvider(query, maxResults),
+        wikipedia: async ({ query, maxResults }) => searchWikipediaProvider(query, maxResults),
+        bing_rss: async ({ query, maxResults }) => searchBingRssProvider(query, maxResults),
+    };
+}
+
+async function searchDuckDuckGoWithMeta(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
+    const options = typeof optionsOrMaxResults === 'number'
+        ? { maxResults: optionsOrMaxResults }
+        : (optionsOrMaxResults || {});
+    const maxResults = Math.min(
+        Math.max(1, Number(options.maxResults) || MAX_RESULTS_DEFAULT),
+        MAX_RESULTS_LIMIT,
+    );
+    const locale = String(options.locale || DEFAULT_LOCALE);
+    const recencyDays = Math.max(1, Number(options.recencyDays) || DEFAULT_RECENCY_DAYS);
+    const trustedDomains = normalizeDomainList(options.trustedDomains);
+    const excludeDomains = normalizeDomainList(options.excludeDomains);
+    const qualityMode = ['fast', 'balanced', 'max'].includes(String(options.qualityMode || '').toLowerCase())
+        ? String(options.qualityMode).toLowerCase()
+        : 'balanced';
+    const debug = Boolean(options.debug);
+    const queryText = String(query || '').trim();
+    const startedAt = Date.now();
+
+    if (!isSearchPipelineV2Enabled()) {
+        const results = await searchDuckDuckGoLegacy(queryText, {
+            maxResults,
+            locale,
+            recencyDays,
+            trustedDomains,
+            excludeDomains,
+        });
+        return {
+            results,
+            meta: {
+                pipelineVersion: 'legacy',
+                timingMs: { total: Date.now() - startedAt, retrieval: Date.now() - startedAt, rerank: 0 },
+                providerSummary: {},
+                confidence: { score: 0.45, level: 'medium', isFallback: false, reasons: ['legacy_pipeline'] },
+                isFallback: false,
+            },
+        };
+    }
+
+    const plan = buildQueryPlan(queryText, { qualityMode });
+    const retrievalStartedAt = Date.now();
+    const retrieval = await runRetrievalOrchestrator({
+        plan,
+        providers: buildProviderRegistry(),
+        locale,
+        maxResults,
+        qualityMode,
+        normalizeResult,
+    });
+    const retrievalMs = Date.now() - retrievalStartedAt;
+
+    const scored = scoreAndRankCandidates({
+        plan,
+        candidates: retrieval.candidates,
+        maxResults: Math.max(maxResults, 8),
+        trustedDomains,
+        excludeDomains,
+        qualityMode,
+    });
+
+    const rerankStartedAt = Date.now();
+    const rerank = await rerankSearchResults({
+        query: plan.normalizedQuery,
+        candidates: scored.top.slice(0, 12),
+        maxResults: Math.max(maxResults, 8),
+        qualityMode,
+        timeoutMs: 1200,
+    });
+    const rerankMs = Date.now() - rerankStartedAt;
+
+    const finalRanked = Array.isArray(rerank.results) && rerank.results.length > 0
+        ? rerank.results
+        : scored.top;
+    const confidence = computeSearchConfidence({
+        ranked: finalRanked,
+        plan,
+    });
+
+    const results = finalRanked.slice(0, maxResults);
+    const meta = {
+        pipelineVersion: 'v2',
+        timingMs: {
+            total: Date.now() - startedAt,
+            retrieval: retrievalMs,
+            rerank: rerankMs,
+        },
+        providerSummary: retrieval.providerSummary,
+        confidence,
+        isFallback: Boolean(retrieval.isFallback || confidence.isFallback),
+    };
+
+    console.log(`[SearchV2] ${JSON.stringify({
+        query: plan.normalizedQuery,
+        qualityMode,
+        variants: plan.queryVariants.length,
+        candidates: retrieval.candidates.length,
+        scored: scored.meta.scoredCandidates,
+        confidence: confidence.score,
+        confidenceLevel: confidence.level,
+        timings: meta.timingMs,
+        isFallback: meta.isFallback,
+    })}`);
+
+    if (debug) {
+        meta.debug = {
+            plan,
+            scoring: scored.meta,
+            rerank: rerank.meta,
+        };
+    }
+
+    return { results, meta };
+}
+
+async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
+    const payload = await searchDuckDuckGoWithMeta(query, optionsOrMaxResults);
+    return payload.results;
 }
 
 module.exports = async function handler(req, res) {
@@ -1080,6 +1219,8 @@ module.exports = async function handler(req, res) {
         recencyDays = DEFAULT_RECENCY_DAYS,
         trustedDomains = [],
         excludeDomains = [],
+        debug = false,
+        qualityMode = 'balanced',
     } = req.body || {};
 
     if (!query || !String(query).trim()) {
@@ -1092,19 +1233,22 @@ module.exports = async function handler(req, res) {
     );
 
     try {
-        const results = await searchDuckDuckGo(String(query).trim(), {
+        const payload = await searchDuckDuckGoWithMeta(String(query).trim(), {
             maxResults: limit,
             locale,
             recencyDays,
             trustedDomains,
             excludeDomains,
+            debug,
+            qualityMode,
         });
 
         return res.status(200).json({
             query: String(query).trim(),
             locale,
             recencyDays: Number(recencyDays) || DEFAULT_RECENCY_DAYS,
-            results,
+            results: payload.results,
+            meta: payload.meta,
         });
     } catch (error) {
         console.error('Search error:', error.message);
@@ -1116,6 +1260,8 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.searchDuckDuckGo = searchDuckDuckGo;
+module.exports.searchDuckDuckGoWithMeta = searchDuckDuckGoWithMeta;
+module.exports.searchDuckDuckGoLegacy = searchDuckDuckGoLegacy;
 module.exports.__test = {
     canonicalizeUrl,
     normalizeDomain,
@@ -1125,4 +1271,5 @@ module.exports.__test = {
     parseRssItems,
     isProductSpecsQuery,
     isSpecsRelevantResult,
+    isSearchPipelineV2Enabled,
 };
