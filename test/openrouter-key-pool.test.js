@@ -11,7 +11,7 @@ const {
     withOpenRouterFailover,
     __resetForTests,
     __setKeyStateForTests,
-} = require('../api/lib/openrouter-key-pool');
+} = require('../lib/openrouter-key-pool');
 
 const ORIGINAL_ENV = { ...process.env };
 

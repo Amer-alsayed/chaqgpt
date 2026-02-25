@@ -1,4 +1,4 @@
-const { getModelCatalog } = require('./lib/model-catalog');
+const { getModelCatalog } = require('../lib/model-catalog');
 
 module.exports = async function handler(req, res) {
     if (req.method !== 'GET') {

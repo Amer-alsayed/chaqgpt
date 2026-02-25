@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # ChaqGPT
 
@@ -7,7 +7,7 @@
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/import/project?template=https://github.com/Amer-alsayed/chaqgpt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Live Demo](https://chaqgpt.vercel.app) · [Report Bug](https://github.com/Amer-alsayed/chaqgpt/issues) · [Request Feature](https://github.com/Amer-alsayed/chaqgpt/issues)
+[Live Demo](https://chaqgpt.vercel.app) � [Report Bug](https://github.com/Amer-alsayed/chaqgpt/issues) � [Request Feature](https://github.com/Amer-alsayed/chaqgpt/issues)
 
 </div>
 
@@ -117,23 +117,23 @@ The app will be available at `http://localhost:3000`.
 
 ```text
 chaqgpt/
-├── api/
-│   ├── chat.js
-│   ├── image.js
-│   ├── models.js
-│   └── lib/
-│       ├── model-catalog.js
-│       ├── openrouter-models.js
-│       ├── groq-models.js
-│       ├── provider-key-pool.js
-│       ├── openrouter-key-pool.js
-│       └── groq-key-pool.js
-├── assets/
-│   ├── css/style.css
-│   └── js/app.js
-├── index.html
-├── server.js
-└── README.md
++-- api/
+�   +-- chat.js
+�   +-- image.js
+�   +-- models.js
+�   +-- lib/
+�       +-- model-catalog.js
+�       +-- openrouter-models.js
+�       +-- groq-models.js
+�       +-- provider-key-pool.js
+�       +-- openrouter-key-pool.js
+�       +-- groq-key-pool.js
++-- assets/
+�   +-- css/style.css
+�   +-- js/app.js
++-- index.html
++-- server.js
++-- README.md
 ```
 
 ---

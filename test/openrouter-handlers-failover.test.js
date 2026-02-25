@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const pool = require('../api/lib/openrouter-key-pool');
-const modelCatalog = require('../api/lib/model-catalog');
+const pool = require('../lib/openrouter-key-pool');
+const modelCatalog = require('../lib/model-catalog');
 
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_FETCH = global.fetch;

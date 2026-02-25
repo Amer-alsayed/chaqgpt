@@ -13,9 +13,9 @@ function restoreEnv() {
 
 function clearGroqModules() {
     const modules = [
-        '../api/lib/groq-models',
-        '../api/lib/groq-key-pool',
-        '../api/lib/provider-key-pool',
+        '../lib/groq-models',
+        '../lib/groq-key-pool',
+        '../lib/provider-key-pool',
     ];
     for (const id of modules) {
         delete require.cache[require.resolve(id)];
@@ -58,7 +58,7 @@ test('getGroqModels returns only active chat-usable models from probing', async 
         return new Response('{}', { status: 404 });
     };
 
-    const { getGroqModels } = require('../api/lib/groq-models');
+    const { getGroqModels } = require('../lib/groq-models');
     const payload = await getGroqModels();
 
     assert.equal(payload.models.length, 1);

@@ -13,12 +13,12 @@ function restoreEnv() {
 
 function clearModelModules() {
     const modules = [
-        '../api/lib/model-catalog',
-        '../api/lib/openrouter-models',
-        '../api/lib/groq-models',
-        '../api/lib/openrouter-key-pool',
-        '../api/lib/groq-key-pool',
-        '../api/lib/provider-key-pool',
+        '../lib/model-catalog',
+        '../lib/openrouter-models',
+        '../lib/groq-models',
+        '../lib/openrouter-key-pool',
+        '../lib/groq-key-pool',
+        '../lib/provider-key-pool',
     ];
 
     for (const id of modules) {
@@ -80,7 +80,7 @@ test('model catalog merges providers with scoped ids and resolves legacy raw ids
         return new Response('{}', { status: 404 });
     };
 
-    const { getModelCatalog, getModelById } = require('../api/lib/model-catalog');
+    const { getModelCatalog, getModelById } = require('../lib/model-catalog');
     const payload = await getModelCatalog();
 
     assert.equal(Array.isArray(payload.models), true);

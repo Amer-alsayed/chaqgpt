@@ -1,6 +1,6 @@
-const { getModelById } = require('./lib/model-catalog');
-const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
-const { withGroqFailover } = require('./lib/groq-key-pool');
+const { getModelById } = require('../lib/model-catalog');
+const { withOpenRouterFailover } = require('../lib/openrouter-key-pool');
+const { withGroqFailover } = require('../lib/groq-key-pool');
 
 function extractImagesFromMessage(message) {
     const images = [];

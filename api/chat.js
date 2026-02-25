@@ -1,7 +1,7 @@
-const { getModelById } = require('./lib/model-catalog');
-const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
-const { withGroqFailover } = require('./lib/groq-key-pool');
-const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('./lib/tools');
+const { getModelById } = require('../lib/model-catalog');
+const { withOpenRouterFailover } = require('../lib/openrouter-key-pool');
+const { withGroqFailover } = require('../lib/groq-key-pool');
+const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('../lib/tools');
 
 const MAX_TOOL_ROUNDS = 4;
 const MAX_TOOL_CALLS_TOTAL = 4;

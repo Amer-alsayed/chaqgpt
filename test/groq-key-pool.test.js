@@ -8,7 +8,7 @@ const {
     getConfiguredGroqKeys,
     withGroqFailover,
     __resetForTests,
-} = require('../api/lib/groq-key-pool');
+} = require('../lib/groq-key-pool');
 
 const ORIGINAL_ENV = { ...process.env };
 
