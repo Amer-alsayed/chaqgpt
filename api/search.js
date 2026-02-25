@@ -164,8 +164,10 @@ function isRecencySensitiveQuery(query) {
 
 function isCurrentOfficeQuery(query) {
     const q = String(query || '').toLowerCase();
-    return /\b(who is|current|incumbent|serving)\b/.test(q)
-        && /\b(president|prime minister|ceo|governor|chancellor|secretary of state|speaker of the house)\b/.test(q);
+    const asksForPerson = /\b(who|current|incumbent|serving|office[- ]holder)\b/.test(q);
+    const officeMention = /\b(president|prime minister|ceo|governor|chancellor|secretary of state|speaker of the house)\b/.test(q);
+    if (asksForPerson && officeMention) return true;
+    return /\bpresident\b/.test(q) && /\b(us|usa|united states)\b/.test(q);
 }
 
 function isAIBenchmarkQuery(query) {
@@ -377,7 +379,7 @@ function applyQueryIntentAdjustment(result, query) {
     const wantsCurrentOffice = /\b(president|prime minister|ceo|current)\b/.test(q);
     if (wantsCurrentOffice) {
         if (domain.endsWith('.gov') || domain.includes('whitehouse.gov') || domain.includes('usa.gov')) delta += 0.09;
-        if (domain === 'wikipedia.org') delta -= 0.03;
+        if (domain === 'wikipedia.org') delta -= 0.14;
     }
 
     if (isCurrentOfficeQuery(q)) {
@@ -386,6 +388,7 @@ function applyQueryIntentAdjustment(result, query) {
         if (CURRENT_OFFICE_DOMAINS.has(domain)) delta += 0.18;
         if (hasCurrentSignal) delta += 0.08;
         if (hasHistoricalSignal) delta -= 0.16;
+        if (domain === 'wikipedia.org' && !hasCurrentSignal) delta -= 0.2;
         if (GENERIC_NEWS_DOMAINS.has(domain) && !hasCurrentSignal) delta -= 0.06;
     }
 
@@ -664,6 +667,12 @@ function dedupeAndScore(rawResults, options) {
             continue;
         }
 
+        if (isCurrentOfficeQuery(query)) {
+            const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+            const isHistorical = /\b(list of|past presidents|former presidents|historical|history)\b/.test(text);
+            if (result.domain === 'wikipedia.org' && isHistorical) continue;
+        }
+
         const domainTrust = trustScore(result, trustedDomains, highStakes, query);
         const freshness = freshnessScore(result, recencyDays, query);
         const specificity = specificityScore(result);
@@ -728,6 +737,73 @@ function normalizeDomainList(value) {
     return [...set];
 }
 
+function appendProviderResults(raw, providerSummary, settledResults) {
+    for (const result of settledResults) {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            for (const item of result.value) {
+                const normalized = normalizeResult(item);
+                raw.push(normalized);
+                if (providerSummary[normalized.sourceEngine] !== undefined) {
+                    providerSummary[normalized.sourceEngine] += 1;
+                }
+            }
+        } else {
+            providerSummary.failed += 1;
+        }
+    }
+}
+
+function shouldRunRescuePass(ranked, query, maxResults, trustedDomains = []) {
+    const top = ranked.slice(0, Math.max(5, maxResults));
+    if (top.length === 0) return true;
+
+    const uniqueDomains = new Set(top.map((r) => r.domain).filter(Boolean));
+    const wikiCount = top.filter((r) => r.domain === 'wikipedia.org').length;
+    const nonWikiCount = top.length - wikiCount;
+
+    if (nonWikiCount === 0) return true;
+    if (wikiCount >= Math.ceil(top.length * 0.6)) return true;
+    if (top.length >= 3 && uniqueDomains.size < 2) return true;
+
+    if (isCurrentOfficeQuery(query)) {
+        const officialCount = top.filter((r) => CURRENT_OFFICE_DOMAINS.has(r.domain) || String(r.domain || '').endsWith('.gov')).length;
+        if (officialCount < 1) return true;
+    }
+
+    if (isAIBenchmarkQuery(query)) {
+        const benchmarkCount = top.filter((r) => AI_BENCHMARK_DOMAINS.has(r.domain)).length;
+        const trustedHits = top.filter((r) => trustedDomains.includes(r.domain) || Number(r.trustScore || 0) >= 0.88).length;
+        if (benchmarkCount < 1 || trustedHits < 2) return true;
+    }
+
+    return false;
+}
+
+function buildRescueQueries(query) {
+    const q = String(query || '').trim();
+    if (!q) return [];
+
+    const year = new Date().getFullYear();
+    const queries = [
+        `${q} official source`,
+        `${q} ${year}`,
+    ];
+
+    if (isCurrentOfficeQuery(q)) {
+        queries.unshift(`site:whitehouse.gov ${q}`);
+        queries.push(`site:usa.gov ${q}`);
+        queries.push(`${q} incumbent ${year}`);
+    }
+
+    if (isAIBenchmarkQuery(q)) {
+        queries.unshift(`site:paperswithcode.com ${q} leaderboard`);
+        queries.push(`site:lmarena.ai ${q} ranking`);
+        queries.push(`site:huggingface.co ${q} benchmark`);
+    }
+
+    return [...new Set(queries.map((item) => item.trim()).filter(Boolean))].slice(0, 4);
+}
+
 async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
     const options = typeof optionsOrMaxResults === 'number'
         ? { maxResults: optionsOrMaxResults }
@@ -776,17 +852,7 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
             searchDDGLiteProvider(searchQuery, maxResults * 2),
         ];
         const primarySettled = await Promise.allSettled(primaryProviders);
-        for (const result of primarySettled) {
-            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                for (const item of result.value) {
-                    const normalized = normalizeResult(item);
-                    raw.push(normalized);
-                    if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
-                }
-            } else {
-                providerSummary.failed += 1;
-            }
-        }
+        appendProviderResults(raw, providerSummary, primarySettled);
 
         const primaryRanked = dedupeAndScore(raw, {
             recencyDays,
@@ -810,25 +876,38 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
                 ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
             ];
             const secondarySettled = await Promise.allSettled(secondaryProviders);
-            for (const result of secondarySettled) {
-                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                    for (const item of result.value) {
-                        const normalized = normalizeResult(item);
-                        raw.push(normalized);
-                        if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
-                    }
-                } else {
-                    providerSummary.failed += 1;
-                }
-            }
+            appendProviderResults(raw, providerSummary, secondarySettled);
         }
 
-        const ranked = dedupeAndScore(raw, {
+        let ranked = dedupeAndScore(raw, {
             recencyDays,
             trustedDomains,
             excludeDomains,
             query: searchQuery,
         });
+
+        if (shouldRunRescuePass(ranked, searchQuery, maxResults, trustedDomains)) {
+            const rescueQueries = buildRescueQueries(searchQuery);
+            for (const rescueQuery of rescueQueries) {
+                const rescueProviders = [
+                    searchDDGHtmlProvider(rescueQuery, maxResults * 2, locale),
+                    searchDDGLiteProvider(rescueQuery, maxResults * 2),
+                    searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2))),
+                    ...(shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery) || isAIBenchmarkQuery(searchQuery)
+                        ? [searchBingRssProvider(rescueQuery, maxResults * 2)]
+                        : []),
+                ];
+                const rescueSettled = await Promise.allSettled(rescueProviders);
+                appendProviderResults(raw, providerSummary, rescueSettled);
+            }
+            ranked = dedupeAndScore(raw, {
+                recencyDays,
+                trustedDomains,
+                excludeDomains,
+                query: searchQuery,
+            });
+        }
+
         console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
         const output = ranked.slice(0, maxResults);
         setCachedSearch(cacheKey, output);

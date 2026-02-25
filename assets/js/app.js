@@ -1044,6 +1044,40 @@ function getStreamingResponseMode(isWritingCode = false) {
     return 'normal';
 }
 
+function sanitizeMessagesForAPI(messages) {
+    if (!Array.isArray(messages)) return [];
+    const sanitized = [];
+
+    for (const message of messages) {
+        const role = String(message?.role || '').toLowerCase();
+        if (!['system', 'user', 'assistant', 'tool'].includes(role)) continue;
+
+        if (role === 'tool') {
+            const toolCallId = String(message?.tool_call_id || '').trim();
+            if (!toolCallId) continue;
+            sanitized.push({
+                role: 'tool',
+                tool_call_id: toolCallId,
+                content: typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? ''),
+            });
+            continue;
+        }
+
+        const item = {
+            role,
+            content: message?.content,
+        };
+
+        if (role === 'assistant' && Array.isArray(message?.tool_calls)) {
+            item.tool_calls = message.tool_calls;
+        }
+
+        sanitized.push(item);
+    }
+
+    return sanitized;
+}
+
 function buildResponseActivity(mode = 'normal', compact = false) {
     const activity = {
         normal: {
@@ -1519,7 +1553,7 @@ window.sendMessage = async function () {
 
     try {
         // Build messages with optional canvas context
-        let messagesForAPI = [...conversationHistory];
+        let messagesForAPI = sanitizeMessagesForAPI(conversationHistory);
 
         // If canvas mode is ON, inject code context
         if (canvasMode) {

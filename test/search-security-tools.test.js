@@ -84,3 +84,61 @@ test('parseDuckDuckGoLiteHTML decodes redirect links with uddg target', () => {
     assert.equal(parsed.length, 1);
     assert.equal(parsed[0].url, 'https://whitehouse.gov/administration');
 });
+
+test('searchDuckDuckGo rescue pass adds non-Wikipedia official sources for current-office queries', async () => {
+    global.fetch = async (url, options = {}) => {
+        const u = String(url);
+        const body = decodeURIComponent(String(options?.body || ''));
+
+        if (u.includes('html.duckduckgo.com')) {
+            if (body.includes('site:whitehouse.gov')) {
+                return new Response(
+                    '<div class="result"><div class="result__body"><a class="result__a" href="https://www.whitehouse.gov/administration/president-bio/">The President</a><a class="result__snippet">Official White House biography and current administration details.</a></div></div>',
+                    { status: 200 },
+                );
+            }
+            return new Response(
+                '<div class="result"><div class="result__body"><a class="result__a" href="https://en.wikipedia.org/wiki/President_of_the_United_States">President of the United States</a><a class="result__snippet">List of past presidents and office history.</a></div></div>',
+                { status: 200 },
+            );
+        }
+
+        if (u.includes('lite.duckduckgo.com')) {
+            return new Response(
+                '<a href="/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FPresident_of_the_United_States">President of the United States</a>',
+                { status: 200 },
+            );
+        }
+
+        if (u.includes('api.duckduckgo.com')) {
+            return new Response(
+                JSON.stringify({
+                    AbstractText: 'President office overview',
+                    AbstractURL: 'https://en.wikipedia.org/wiki/President_of_the_United_States',
+                    Heading: 'President of the United States',
+                    RelatedTopics: [],
+                }),
+                { status: 200 },
+            );
+        }
+
+        if (u.includes('wikipedia.org/w/api.php')) {
+            return new Response(
+                JSON.stringify({
+                    query: { search: [{ title: 'President of the United States', snippet: 'Past presidents list and history' }] },
+                }),
+                { status: 200 },
+            );
+        }
+
+        if (u.includes('bing.com/search')) {
+            return new Response('', { status: 500 });
+        }
+
+        return new Response('', { status: 500 });
+    };
+
+    const results = await searchDuckDuckGo(`who is the president of the usa reliability-${Date.now()}`, { maxResults: 4 });
+    assert.ok(results.length > 0);
+    assert.ok(results.some((result) => String(result.domain || '').includes('whitehouse.gov')));
+});

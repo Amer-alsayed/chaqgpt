@@ -52,3 +52,32 @@ test('dedupeAndScore prioritizes benchmark domains over generic news for benchma
     assert.ok(ranked.length >= 1);
     assert.equal(ranked[0].domain, 'paperswithcode.com');
 });
+
+test('dedupeAndScore deprioritizes historical Wikipedia pages for current-office intent', () => {
+    const ranked = searchModule.__test.dedupeAndScore([
+        {
+            title: 'List of presidents of the United States',
+            url: 'https://en.wikipedia.org/wiki/List_of_presidents_of_the_United_States',
+            snippet: 'History and former presidents.',
+            sourceEngine: 'wikipedia',
+            domain: 'wikipedia.org',
+            publishedAt: null,
+        },
+        {
+            title: 'The White House - President',
+            url: 'https://www.whitehouse.gov/administration/president-bio/',
+            snippet: 'Official current administration page.',
+            sourceEngine: 'ddg_html',
+            domain: 'whitehouse.gov',
+            publishedAt: '2026-01-20',
+        },
+    ], {
+        query: 'who is the president of the usa',
+        recencyDays: 14,
+        trustedDomains: [],
+        excludeDomains: [],
+    });
+
+    assert.ok(ranked.length >= 1);
+    assert.equal(ranked[0].domain, 'whitehouse.gov');
+});
