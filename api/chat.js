@@ -1,5 +1,6 @@
-const { getModelById } = require('./lib/openrouter-models');
+const { getModelById } = require('./lib/model-catalog');
 const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
+const { withGroqFailover } = require('./lib/groq-key-pool');
 const { TOOL_DEFINITIONS, executeTool, buildSearchContext } = require('./lib/tools');
 
 const MAX_TOOL_ROUNDS = 4;
@@ -135,10 +136,44 @@ function ensureCitationGuard(answerText, sources) {
     return `${answerText}\n\nConfidence note: Evidence coverage is limited for some claims. Please verify critical facts directly from the cited sources.`;
 }
 
-async function runOpenRouterCompletion(request, model, messages, { tools = null, stream = false, maxTokens = 4096 } = {}) {
+async function runProviderCompletion(request, modelInfo, messages, { tools = null, stream = false, maxTokens = 4096 } = {}) {
     const referer = request.headers.origin || 'http://localhost:3000';
-    const failoverResult = await withOpenRouterFailover({
-        modelId: model,
+    const provider = String(modelInfo?.provider || '').toLowerCase();
+    const upstreamModelId = String(modelInfo?.upstreamModelId || modelInfo?.id || '').trim();
+
+    if (!provider || !upstreamModelId) {
+        return {
+            ok: false,
+            attempts: [],
+            lastFailure: {
+                type: 'config',
+                message: 'Model provider configuration is invalid.',
+            },
+        };
+    }
+
+    if (provider === 'groq') {
+        return withGroqFailover({
+            modelId: upstreamModelId,
+            requestFactory: ({ apiKey }) => fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: upstreamModelId,
+                    messages,
+                    tools: tools || undefined,
+                    max_tokens: maxTokens,
+                    stream,
+                }),
+            }),
+        });
+    }
+
+    return withOpenRouterFailover({
+        modelId: upstreamModelId,
         requestFactory: ({ apiKey }) => fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -148,7 +183,7 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
                 'X-Title': 'ChaqGPT',
             },
             body: JSON.stringify({
-                model,
+                model: upstreamModelId,
                 messages,
                 tools: tools || undefined,
                 max_tokens: maxTokens,
@@ -156,7 +191,6 @@ async function runOpenRouterCompletion(request, model, messages, { tools = null,
             }),
         }),
     });
-    return failoverResult;
 }
 
 function flattenUserContent(content) {
@@ -187,8 +221,8 @@ function isSimpleFactQuery(text) {
     return false;
 }
 
-async function forceTextCompletion(request, model, messages, options = {}) {
-    const result = await runOpenRouterCompletion(request, model, messages, {
+async function forceTextCompletion(request, modelInfo, messages, options = {}) {
+    const result = await runProviderCompletion(request, modelInfo, messages, {
         stream: false,
         maxTokens: Number(options.maxTokens) || 3072,
     });
@@ -224,7 +258,7 @@ function structuredMetricLog(data) {
     console.log(`[AgenticMetrics] ${JSON.stringify(data)}`);
 }
 
-async function agenticLoop(request, model, messages, { onProgress } = {}) {
+async function agenticLoop(request, modelInfo, messages, { onProgress } = {}) {
     const today = new Date().toISOString().split('T')[0];
     const deadline = Date.now() + MAX_AGENT_WALL_TIME_MS;
     let totalToolCalls = 0;
@@ -264,7 +298,7 @@ async function agenticLoop(request, model, messages, { onProgress } = {}) {
             break;
         }
 
-        const callResult = await runOpenRouterCompletion(request, model, currentMessages, {
+        const callResult = await runProviderCompletion(request, modelInfo, currentMessages, {
             tools: TOOL_DEFINITIONS,
             stream: false,
             maxTokens: 3072,
@@ -408,7 +442,7 @@ async function agenticLoop(request, model, messages, { onProgress } = {}) {
         },
     ];
 
-    const forcedAnswerRaw = await forceTextCompletion(request, model, forcedMessages, { maxTokens: 3072 });
+    const forcedAnswerRaw = await forceTextCompletion(request, modelInfo, forcedMessages, { maxTokens: 3072 });
     if (forcedAnswerRaw) {
         const answer = ensureCitationGuard(forcedAnswerRaw, [...sourceMap.values()]);
         const coverage = citationCoverageRatio(answer, [...sourceMap.values()]);
@@ -439,7 +473,7 @@ async function agenticLoop(request, model, messages, { onProgress } = {}) {
                 content: 'Write a concise, factual answer with inline citations. Do not list raw search snippets.',
             },
         ];
-        const contextAnswer = await forceTextCompletion(request, model, contextMessages, { maxTokens: 2048 });
+        const contextAnswer = await forceTextCompletion(request, modelInfo, contextMessages, { maxTokens: 2048 });
         if (contextAnswer) {
             for (const src of contextFallback.sources || []) addSource(sourceMap, src);
             const answer = ensureCitationGuard(contextAnswer, [...sourceMap.values()]);
@@ -511,7 +545,7 @@ module.exports = async function handler(request, response) {
             });
 
             if (supportsTools && !quickPath) {
-                const result = await agenticLoop(request, model, messages, {
+                const result = await agenticLoop(request, modelInfo, messages, {
                     onProgress: emitProgress,
                 });
                 if (result.ok) {
@@ -537,16 +571,16 @@ module.exports = async function handler(request, response) {
             }
 
             emitProgress({ phase: 'model', message: 'Generating final answer...' });
-            const failoverResult = await runOpenRouterCompletion(request, model, enhancedMessages, { stream: true });
-            if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
+            const failoverResult = await runProviderCompletion(request, modelInfo, enhancedMessages, { stream: true });
+            if (!failoverResult.ok) return handleFailoverError(response, failoverResult, modelInfo.providerLabel);
 
             if (searchSources.length > 0) sendSSEEvent(response, 'sources', searchSources);
             await pipeStream(failoverResult.response.body, response);
             return;
         }
 
-        const failoverResult = await runOpenRouterCompletion(request, model, messages, { stream: true });
-        if (!failoverResult.ok) return handleFailoverError(response, failoverResult);
+        const failoverResult = await runProviderCompletion(request, modelInfo, messages, { stream: true });
+        if (!failoverResult.ok) return handleFailoverError(response, failoverResult, modelInfo.providerLabel);
 
         startSSEStream(response);
         await pipeStream(failoverResult.response.body, response);
@@ -558,7 +592,8 @@ module.exports = async function handler(request, response) {
     }
 };
 
-function handleFailoverError(response, failoverResult) {
+function handleFailoverError(response, failoverResult, providerLabel = null) {
+    const provider = providerLabel || failoverResult.provider || 'Provider';
     if (response.headersSent) {
         const message = failoverResult.lastFailure?.errorText
             ? String(failoverResult.lastFailure.errorText).slice(0, 500)
@@ -573,14 +608,14 @@ function handleFailoverError(response, failoverResult) {
     }
 
     if (failoverResult.lastFailure?.type === 'config') {
-        return response.status(500).json({ error: 'API key not configured.' });
+        return response.status(500).json({ error: `${provider} API key not configured.` });
     }
     if (failoverResult.lastFailure?.type === 'response') {
         const errorData = parseErrorText(failoverResult.lastFailure.errorText);
         return response.status(failoverResult.lastFailure.status || 502).json(errorData);
     }
     return response.status(502).json({
-        error: 'All OpenRouter keys failed due to network/upstream issues.',
+        error: `All ${provider} keys failed due to network/upstream issues.`,
         attempts: failoverResult.attempts?.length || 0,
     });
 }

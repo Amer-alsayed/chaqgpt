@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
     getConfiguredKeys,
@@ -34,6 +37,18 @@ test('getConfiguredKeys falls back to OPENROUTER_API_KEY when JSON is invalid', 
     process.env.OPENROUTER_API_KEYS_JSON = '{not-json}';
     process.env.OPENROUTER_API_KEY = 'single-fallback';
     assert.deepEqual(getConfiguredKeys(), ['single-fallback']);
+});
+
+test('getConfiguredKeys falls back to OPENROUTER_API_KEYS_FILE when env keys are missing', () => {
+    const tempFile = path.join(os.tmpdir(), `openrouter-keys-${Date.now()}.env`);
+    fs.writeFileSync(tempFile, '  sk-or-a  \n# comment\nOPENROUTER_API_KEY=sk-or-b\n["sk-or-c","sk-or-a"]\n', 'utf8');
+    process.env.OPENROUTER_API_KEYS_FILE = tempFile;
+    delete process.env.OPENROUTER_API_KEYS_JSON;
+    delete process.env.OPENROUTER_API_KEY;
+
+    assert.deepEqual(getConfiguredKeys(), ['sk-or-a', 'sk-or-b', 'sk-or-c']);
+
+    fs.unlinkSync(tempFile);
 });
 
 test('pickNextKey rotates fairly and skips excluded keys', () => {

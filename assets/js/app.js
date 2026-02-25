@@ -6,7 +6,7 @@ const API_IMAGE_URL = '/api/image';
 let conversationHistory = [];
 let isProcessing = false;
 let messagesContainer = null;
-let currentModel = 'openrouter/aurora-alpha'; // Default: Aurora Alpha
+let currentModel = 'openrouter::openrouter/aurora-alpha'; // Default: Aurora Alpha
 let currentChatId = null;
 let chatHistoryData = {};
 let abortController = null;
@@ -62,6 +62,61 @@ ${supportPolicy}
 Output clean, complete, runnable code in a single fenced code block with a correct language tag. Keep explanation brief.`;
 }
 
+function normalizeModelEntry(model) {
+    const upstreamModelId = String(model?.upstreamModelId || model?.id || '').trim();
+    const provider = String(model?.provider || (String(model?.id || '').startsWith('groq::') ? 'groq' : 'openrouter')).toLowerCase();
+    const providerLabel = provider === 'groq' ? 'Groq' : 'OpenRouter';
+    const scopedId = String(model?.id || '').includes('::')
+        ? String(model.id)
+        : `${provider}::${upstreamModelId}`;
+
+    return {
+        ...model,
+        id: scopedId,
+        provider,
+        providerLabel: model?.providerLabel || providerLabel,
+        upstreamModelId,
+        capabilities: {
+            reasoning: Boolean(model?.capabilities?.reasoning ?? model?.supportsThinking),
+            visionInput: Boolean(model?.capabilities?.visionInput ?? model?.supportsVision),
+            imageOutput: Boolean(model?.capabilities?.imageOutput),
+            fileInputPdf: Boolean(model?.capabilities?.fileInputPdf),
+            textChat: Boolean(model?.capabilities?.textChat ?? true),
+            toolUse: Boolean(model?.capabilities?.toolUse),
+        },
+    };
+}
+
+function findModelByLegacyId(rawId) {
+    const target = String(rawId || '').trim();
+    if (!target) return null;
+
+    const openRouterPreferred = availableModels.find((model) =>
+        model.provider === 'openrouter' && model.upstreamModelId === target);
+    if (openRouterPreferred) return openRouterPreferred;
+
+    return availableModels.find((model) => model.upstreamModelId === target) || null;
+}
+
+function resolveStoredModelSelection(storedId) {
+    const saved = String(storedId || '').trim();
+    if (!saved) return null;
+
+    const exact = availableModels.find((model) => model.id === saved);
+    if (exact) return exact;
+
+    const legacy = findModelByLegacyId(saved);
+    if (legacy) return legacy;
+
+    return null;
+}
+
+function getModelDisplayName(model) {
+    if (!model) return 'Model';
+    if (!model.providerLabel) return model.name;
+    return `${model.name} (${model.providerLabel})`;
+}
+
 // Load dynamic models from API
 async function fetchModels() {
     try {
@@ -73,24 +128,16 @@ async function fetchModels() {
             updateModelFreshnessIndicator();
 
             if (dynamicModels && dynamicModels.length > 0) {
-                availableModels = dynamicModels.map((model) => ({
-                    ...model,
-                    capabilities: {
-                        reasoning: Boolean(model?.capabilities?.reasoning ?? model?.supportsThinking),
-                        visionInput: Boolean(model?.capabilities?.visionInput ?? model?.supportsVision),
-                        imageOutput: Boolean(model?.capabilities?.imageOutput),
-                        fileInputPdf: Boolean(model?.capabilities?.fileInputPdf),
-                        textChat: Boolean(model?.capabilities?.textChat ?? true),
-                    },
-                }));
+                availableModels = dynamicModels.map(normalizeModelEntry);
                 initializeModels();
 
                 // Restore saved model preference
                 const saved = localStorage.getItem('selectedModel');
-                const savedModelExists = saved && availableModels.find(m => m.id === saved);
+                const resolved = resolveStoredModelSelection(saved);
 
-                if (savedModelExists) {
-                    currentModel = saved;
+                if (resolved) {
+                    currentModel = resolved.id;
+                    saveSelectedModel();
                 }
                 if (!getCurrentModelData()) autoSwitchToSupportedModel(true);
                 updateHeaderModelDisplay();
@@ -117,7 +164,8 @@ function getCurrentModelData() {
 
 function pickPreferredSupportedModel() {
     if (!availableModels || availableModels.length === 0) return null;
-    const preferred = availableModels.find((model) => model.id === 'openrouter/aurora-alpha');
+    const preferred = availableModels.find((model) =>
+        model.provider === 'openrouter' && model.upstreamModelId === 'openrouter/aurora-alpha');
     if (preferred) return preferred;
     const textCapable = availableModels.find((model) => model?.capabilities?.textChat !== false);
     return textCapable || availableModels[0];
@@ -132,7 +180,7 @@ function autoSwitchToSupportedModel(notify = false) {
     updateHeaderModelDisplay();
     updateVisionUI();
     if (changed && notify) {
-        showToast(`Model unavailable. Switched to ${fallback.name}.`, 'warning');
+        showToast(`Model unavailable. Switched to ${getModelDisplayName(fallback)}.`, 'warning');
     }
     return true;
 }
@@ -152,7 +200,7 @@ function updateHeaderModelDisplay() {
         const badge = document.getElementById('modelBadge');
         const headerName = document.getElementById('headerModelName');
         if (badge) badge.textContent = savedModelData.badge;
-        if (headerName) headerName.textContent = savedModelData.name;
+        if (headerName) headerName.textContent = getModelDisplayName(savedModelData);
     }
 }
 
@@ -181,8 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (availableModels.length > 0) {
         // Check local storage
         const saved = localStorage.getItem('selectedModel');
-        if (saved && availableModels.find(m => m.id === saved)) {
-            currentModel = saved;
+        const resolved = resolveStoredModelSelection(saved);
+        if (resolved) {
+            currentModel = resolved.id;
         } else {
             currentModel = availableModels[0].id;
             saveSelectedModel();
@@ -359,7 +408,15 @@ function buildModelListHTML(filterQuery = '') {
     const query = filterQuery.toLowerCase();
 
     availableModels.forEach(model => {
-        if (query && !model.name.toLowerCase().includes(query) && !model.id.toLowerCase().includes(query)) return;
+        const providerLabel = String(model.providerLabel || '').toLowerCase();
+        const upstreamModelId = String(model.upstreamModelId || '').toLowerCase();
+        if (query
+            && !model.name.toLowerCase().includes(query)
+            && !model.id.toLowerCase().includes(query)
+            && !providerLabel.includes(query)
+            && !upstreamModelId.includes(query)) {
+            return;
+        }
         if (!categories[model.category]) categories[model.category] = [];
         categories[model.category].push(model);
     });
@@ -370,14 +427,19 @@ function buildModelListHTML(filterQuery = '') {
         categories[category].forEach(model => {
             const caps = model.capabilities || {};
             const tags = [];
+            if (model.providerLabel) tags.push(model.providerLabel);
             if (caps.reasoning) tags.push('Reasoning');
             if (caps.visionInput) tags.push('Vision');
             if (caps.imageOutput) tags.push('Image');
             if (caps.fileInputPdf) tags.push('PDF');
             const tagHtml = tags.length > 0
-                ? `<div class="model-capabilities">${tags.map((tag) => `<span class="model-cap-chip">${tag}</span>`).join('')}</div>`
+                ? `<div class="model-capabilities">${tags.map((tag) => {
+                    const isProviderTag = model.providerLabel && tag === model.providerLabel;
+                    return `<span class="model-cap-chip ${isProviderTag ? 'model-provider-chip' : ''}">${tag}</span>`;
+                }).join('')}</div>`
                 : '';
-            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${model.name}"><div class="model-info"><div class="model-name">${model.name}</div>${tagHtml}</div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+            const displayName = getModelDisplayName(model);
+            html += `<div class="model-item ${model.id === currentModel ? 'selected' : ''}" data-model="${model.id}" data-badge="${model.badge}" data-name="${displayName}"><div class="model-info"><div class="model-name">${model.name}</div>${tagHtml}</div><svg class="model-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 13l4 4L19 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
         });
     });
 

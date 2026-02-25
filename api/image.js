@@ -1,5 +1,6 @@
-const { getModelById } = require('./lib/openrouter-models');
+const { getModelById } = require('./lib/model-catalog');
 const { withOpenRouterFailover } = require('./lib/openrouter-key-pool');
+const { withGroqFailover } = require('./lib/groq-key-pool');
 
 function extractImagesFromMessage(message) {
     const images = [];
@@ -58,10 +59,34 @@ module.exports = async function handler(req, res) {
         const imageConfig = {};
         if (size) imageConfig.size = String(size);
         if (quality) imageConfig.quality = String(quality);
+        const upstreamModelId = modelInfo.upstreamModelId;
+        const provider = String(modelInfo.provider || '').toLowerCase();
 
-        const failoverResult = await withOpenRouterFailover({
-            modelId: model,
-            requestFactory: ({ apiKey }) => fetch('https://openrouter.ai/api/v1/chat/completions', {
+        const requestFactory = ({ apiKey }) => {
+            const commonBody = {
+                model: upstreamModelId,
+                messages: [
+                    {
+                        role: 'user',
+                        content: [{ type: 'text', text: String(prompt) }],
+                    },
+                ],
+                modalities: ['text', 'image'],
+                ...(Object.keys(imageConfig).length > 0 ? { image: imageConfig } : {}),
+            };
+
+            if (provider === 'groq') {
+                return fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify(commonBody),
+                });
+            }
+
+            return fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -69,23 +94,18 @@ module.exports = async function handler(req, res) {
                     'HTTP-Referer': req.headers.origin || 'http://localhost:3000',
                     'X-Title': 'ChaqGPT',
                 },
-                body: JSON.stringify({
-                    model,
-                    messages: [
-                        {
-                            role: 'user',
-                            content: [{ type: 'text', text: String(prompt) }],
-                        },
-                    ],
-                    modalities: ['text', 'image'],
-                    ...(Object.keys(imageConfig).length > 0 ? { image: imageConfig } : {}),
-                }),
-            }),
-        });
+                body: JSON.stringify(commonBody),
+            });
+        };
+
+        const failoverResult = provider === 'groq'
+            ? await withGroqFailover({ modelId: upstreamModelId, requestFactory })
+            : await withOpenRouterFailover({ modelId: upstreamModelId, requestFactory });
 
         if (!failoverResult.ok) {
+            const providerLabel = modelInfo.providerLabel || failoverResult.provider || 'Provider';
             if (failoverResult.lastFailure?.type === 'config') {
-                return res.status(500).json({ error: 'API key not configured.' });
+                return res.status(500).json({ error: `${providerLabel} API key not configured.` });
             }
 
             if (failoverResult.lastFailure?.type === 'response') {
@@ -98,7 +118,7 @@ module.exports = async function handler(req, res) {
             }
 
             return res.status(502).json({
-                error: 'All OpenRouter keys failed due to network/upstream issues.',
+                error: `All ${providerLabel} keys failed due to network/upstream issues.`,
                 attempts: failoverResult.attempts.length,
             });
         }

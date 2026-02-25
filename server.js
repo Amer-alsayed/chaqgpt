@@ -104,5 +104,5 @@ app.post('/api/fetch-url', async (req, res) => {
 // Start the server
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
-  console.log('Note: Configure OPENROUTER_API_KEYS_JSON (preferred) or OPENROUTER_API_KEY in .env for OpenRouter access.');
+  console.log('Note: Configure OPENROUTER_API_KEYS_JSON/OPENROUTER_API_KEY and GROQ_API_KEYS_JSON/GROQ_API_KEY in .env (or key files) for provider access.');
 });
