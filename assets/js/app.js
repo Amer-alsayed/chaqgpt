@@ -20,6 +20,9 @@ let availableModels = [...models]; // Initialize with config models
 let pendingImages = []; // base64 data URLs for image attachments
 let pendingFiles = []; // PDF attachments as data URLs
 let realtimeSearchStatusText = '';
+let realtimeSearchTicker = null;
+let realtimeSearchStartedAt = 0;
+let realtimeSearchLabel = '';
 let imageGenerationMode = false;
 let modelsMeta = null;
 let activeStreamContext = { searchEnabledAtRequest: false, canvasModeAtRequest: false };
@@ -217,7 +220,44 @@ function setSearchRealtimeStatus(text) {
     el.style.display = '';
 }
 
+function stopSearchRealtimeTicker() {
+    if (realtimeSearchTicker) {
+        clearInterval(realtimeSearchTicker);
+        realtimeSearchTicker = null;
+    }
+}
+
+function renderRealtimeSearchTicker() {
+    if (!realtimeSearchLabel) return;
+    const elapsedSec = Math.max(0, (Date.now() - realtimeSearchStartedAt) / 1000).toFixed(1);
+    setSearchRealtimeStatus(`${realtimeSearchLabel} - ${elapsedSec}s`);
+}
+
+function startSearchRealtimeTicker(label = 'Searching the web...') {
+    stopSearchRealtimeTicker();
+    realtimeSearchStartedAt = Date.now();
+    realtimeSearchLabel = String(label || 'Searching the web...').trim();
+    renderRealtimeSearchTicker();
+    realtimeSearchTicker = setInterval(renderRealtimeSearchTicker, 100);
+}
+
+function updateSearchRealtimeTickerLabel(label, elapsedMs = null) {
+    realtimeSearchLabel = String(label || 'Searching...').trim();
+    if (Number.isFinite(Number(elapsedMs))) {
+        realtimeSearchStartedAt = Date.now() - Math.max(0, Number(elapsedMs));
+    } else if (!realtimeSearchStartedAt) {
+        realtimeSearchStartedAt = Date.now();
+    }
+    renderRealtimeSearchTicker();
+    if (!realtimeSearchTicker) {
+        realtimeSearchTicker = setInterval(renderRealtimeSearchTicker, 100);
+    }
+}
+
 function clearSearchRealtimeStatus() {
+    stopSearchRealtimeTicker();
+    realtimeSearchStartedAt = 0;
+    realtimeSearchLabel = '';
     setSearchRealtimeStatus('');
 }
 
@@ -1543,7 +1583,7 @@ window.sendMessage = async function () {
     updateSendButtonState();
     showTypingIndicator();
     if (searchEnabled) {
-        setSearchRealtimeStatus('Searching the web... 0.0s');
+        startSearchRealtimeTicker('Searching the web...');
     } else {
         clearSearchRealtimeStatus();
     }
@@ -1688,12 +1728,11 @@ window.sendMessage = async function () {
                     if (currentSSEEvent === 'search_status') {
                         try {
                             const status = JSON.parse(data);
-                            const elapsedSec = (Number(status?.elapsedMs || 0) / 1000).toFixed(1);
                             const phase = status?.phase ? `[${status.phase}] ` : '';
                             const tool = status?.tool ? ` (${status.tool})` : '';
                             const msg = status?.message || 'Searching...';
                             searchStatusPhase = String(status?.phase || '');
-                            setSearchRealtimeStatus(`${phase}${msg}${tool} • ${elapsedSec}s`);
+                            updateSearchRealtimeTickerLabel(`${phase}${msg}${tool}`, status?.elapsedMs);
                         } catch { }
                         currentSSEEvent = '';
                         continue;
@@ -1834,6 +1873,7 @@ window.sendMessage = async function () {
         }
 
         if (searchStatusPhase === 'error') {
+            stopSearchRealtimeTicker();
             setSearchRealtimeStatus('Search failed. Please retry.');
         } else {
             clearSearchRealtimeStatus();
