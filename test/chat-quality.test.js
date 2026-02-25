@@ -20,3 +20,21 @@ test('ensureCitationGuard appends confidence note for weak citation coverage', (
     );
     assert.match(guarded, /Confidence note:/);
 });
+
+test('sanitizeMessagesForProvider strips unsupported assistant metadata fields', () => {
+    const sanitized = chat.__test.sanitizeMessagesForProvider([
+        { role: 'user', content: 'hello' },
+        {
+            role: 'assistant',
+            content: 'answer',
+            sources: [{ title: 'Example', url: 'https://example.com' }],
+            qualityMetrics: { score: 0.8 },
+        },
+    ]);
+
+    assert.equal(sanitized.length, 2);
+    assert.equal(sanitized[1].role, 'assistant');
+    assert.equal(sanitized[1].content, 'answer');
+    assert.equal(Object.prototype.hasOwnProperty.call(sanitized[1], 'sources'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(sanitized[1], 'qualityMetrics'), false);
+});

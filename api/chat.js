@@ -61,6 +61,98 @@ function inspectMessageFeatures(messages) {
     return { hasImages, hasFiles, hasNonPdfFile };
 }
 
+function sanitizeContentPart(part) {
+    const type = String(part?.type || '').toLowerCase();
+    if (type === 'text') {
+        return { type: 'text', text: String(part?.text || '') };
+    }
+    if (type === 'image_url') {
+        const url = String(part?.image_url?.url || '');
+        if (!url) return null;
+        const detail = String(part?.image_url?.detail || '').trim();
+        return detail
+            ? { type: 'image_url', image_url: { url, detail } }
+            : { type: 'image_url', image_url: { url } };
+    }
+    if (type === 'file') {
+        const fileData = String(part?.file?.file_data || '');
+        if (!fileData) return null;
+        const filename = String(part?.file?.filename || '');
+        return filename
+            ? { type: 'file', file: { file_data: fileData, filename } }
+            : { type: 'file', file: { file_data: fileData } };
+    }
+    return null;
+}
+
+function sanitizeMessageContent(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return String(content ?? '');
+    const parts = content
+        .map(sanitizeContentPart)
+        .filter(Boolean);
+    return parts.length > 0 ? parts : '';
+}
+
+function sanitizeToolCalls(toolCalls) {
+    if (!Array.isArray(toolCalls)) return [];
+    const cleaned = [];
+    for (const toolCall of toolCalls) {
+        const name = String(toolCall?.function?.name || '').trim();
+        if (!name) continue;
+        const id = String(toolCall?.id || '').trim();
+        const args = typeof toolCall?.function?.arguments === 'string'
+            ? toolCall.function.arguments
+            : JSON.stringify(toolCall?.function?.arguments || {});
+        cleaned.push({
+            id: id || `tool_${cleaned.length + 1}`,
+            type: 'function',
+            function: {
+                name,
+                arguments: args,
+            },
+        });
+    }
+    return cleaned;
+}
+
+function sanitizeMessagesForProvider(messages) {
+    if (!Array.isArray(messages)) return [];
+    const cleaned = [];
+    for (const raw of messages) {
+        const role = String(raw?.role || '').toLowerCase();
+        if (!['system', 'user', 'assistant', 'tool'].includes(role)) continue;
+
+        if (role === 'tool') {
+            const toolCallId = String(raw?.tool_call_id || '').trim();
+            if (!toolCallId) continue;
+            cleaned.push({
+                role: 'tool',
+                tool_call_id: toolCallId,
+                content: typeof raw?.content === 'string' ? raw.content : JSON.stringify(raw?.content ?? ''),
+            });
+            continue;
+        }
+
+        const message = {
+            role,
+            content: sanitizeMessageContent(raw?.content),
+        };
+
+        if (role === 'assistant') {
+            const toolCalls = sanitizeToolCalls(raw?.tool_calls);
+            if (toolCalls.length > 0) message.tool_calls = toolCalls;
+        }
+
+        if (typeof raw?.name === 'string' && raw.name.trim()) {
+            message.name = raw.name.trim();
+        }
+
+        cleaned.push(message);
+    }
+    return cleaned;
+}
+
 function parseErrorText(errorText) {
     const text = String(errorText || '');
     if (!text) return { error: { message: 'Upstream request failed' } };
@@ -508,13 +600,17 @@ module.exports = async function handler(request, response) {
         if (!model || !Array.isArray(messages) || messages.length === 0) {
             return response.status(400).json({ error: 'Request must include model and messages.' });
         }
+        const sanitizedMessages = sanitizeMessagesForProvider(messages);
+        if (sanitizedMessages.length === 0) {
+            return response.status(400).json({ error: 'Request messages are invalid.' });
+        }
 
         const modelInfo = await getModelById(model);
         if (!modelInfo) {
             return response.status(400).json({ error: 'Model is unavailable or no longer free.' });
         }
 
-        const { hasImages, hasFiles, hasNonPdfFile } = inspectMessageFeatures(messages);
+        const { hasImages, hasFiles, hasNonPdfFile } = inspectMessageFeatures(sanitizedMessages);
         if (hasImages && !modelInfo.capabilities.visionInput) {
             return response.status(400).json({ error: 'Selected model does not support image input.' });
         }
@@ -527,7 +623,7 @@ module.exports = async function handler(request, response) {
 
         if (searchEnabled) {
             const supportsTools = Boolean(modelInfo.capabilities.toolUse);
-            const lastUserContent = getLastUserMessageContent(messages);
+            const lastUserContent = getLastUserMessageContent(sanitizedMessages);
             const userQuestion = flattenUserContent(lastUserContent);
             const quickPath = isSimpleFactQuery(userQuestion);
             const searchStartTs = Date.now();
@@ -545,7 +641,7 @@ module.exports = async function handler(request, response) {
             });
 
             if (supportsTools && !quickPath) {
-                const result = await agenticLoop(request, modelInfo, messages, {
+                const result = await agenticLoop(request, modelInfo, sanitizedMessages, {
                     onProgress: emitProgress,
                 });
                 if (result.ok) {
@@ -563,10 +659,10 @@ module.exports = async function handler(request, response) {
             emitProgress({ phase: 'searching', message: 'Building search context...' });
             const searchResult = await buildSearchContext(lastUserContent);
 
-            let enhancedMessages = [...messages];
+            let enhancedMessages = [...sanitizedMessages];
             let searchSources = [];
             if (searchResult) {
-                enhancedMessages = [searchResult.message, ...messages];
+                enhancedMessages = [searchResult.message, ...sanitizedMessages];
                 searchSources = searchResult.sources || [];
             }
 
@@ -579,7 +675,7 @@ module.exports = async function handler(request, response) {
             return;
         }
 
-        const failoverResult = await runProviderCompletion(request, modelInfo, messages, { stream: true });
+        const failoverResult = await runProviderCompletion(request, modelInfo, sanitizedMessages, { stream: true });
         if (!failoverResult.ok) return handleFailoverError(response, failoverResult, modelInfo.providerLabel);
 
         startSSEStream(response);
@@ -624,4 +720,5 @@ module.exports.__test = {
     citationCoverageRatio,
     extractCitedUrls,
     ensureCitationGuard,
+    sanitizeMessagesForProvider,
 };

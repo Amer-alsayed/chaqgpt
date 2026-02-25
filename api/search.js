@@ -4,10 +4,9 @@
 
 const MAX_RESULTS_DEFAULT = 5;
 const MAX_RESULTS_LIMIT = 10;
-const SEARCH_TIMEOUT_MS = 10_000;
-const PROVIDER_TIMEOUT_MS = 3_500;
+const PROVIDER_TIMEOUT_MS = 2_800;
 const PROVIDER_RETRY_COUNT = 1;
-const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX_ENTRIES = 200;
 
 const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
@@ -38,8 +37,64 @@ const HIGH_TRUST_DOMAINS = new Set([
     'nature.com',
     'science.org',
     'github.com',
+    'paperswithcode.com',
+    'huggingface.co',
+    'lmarena.ai',
+    'artificialanalysis.ai',
+    'deepmind.google',
+    'anthropic.com',
     'edu',
     'gov',
+]);
+
+const AI_BENCHMARK_DOMAINS = new Set([
+    'paperswithcode.com',
+    'huggingface.co',
+    'lmarena.ai',
+    'artificialanalysis.ai',
+    'epoch.ai',
+    'openai.com',
+    'anthropic.com',
+    'deepmind.google',
+    'meta.com',
+    'google.com',
+    'arxiv.org',
+    'github.com',
+]);
+
+const PRODUCT_SPECS_DOMAINS = new Set([
+    'apple.com',
+    'gsmarena.com',
+    'phonearena.com',
+    'kimovil.com',
+    'notebookcheck.net',
+    '91mobiles.com',
+    'smartprix.com',
+    'nanoreview.net',
+    'theverge.com',
+    'tomsguide.com',
+    'cnet.com',
+]);
+
+const CURRENT_OFFICE_DOMAINS = new Set([
+    'whitehouse.gov',
+    'usa.gov',
+    'house.gov',
+    'senate.gov',
+    'congress.gov',
+    'govtrack.us',
+    'archives.gov',
+]);
+
+const GENERIC_NEWS_DOMAINS = new Set([
+    'apnews.com',
+    'reuters.com',
+    'cbsnews.com',
+    'nbcnews.com',
+    'abcnews.go.com',
+    'go.com',
+    'usatoday.com',
+    'newsweek.com',
 ]);
 
 const PROVIDER_WEIGHTS = {
@@ -57,13 +112,47 @@ const BROWSER_HEADERS = {
 };
 
 const searchCache = new Map();
+const QUERY_NOISE_TOKENS = new Set([
+    'search',
+    'find',
+    'look',
+    'latest',
+    'current',
+    'today',
+    'new',
+    'make',
+    'build',
+    'create',
+    'show',
+    'tell',
+    'give',
+    'please',
+    'help',
+    'how',
+]);
+const PRODUCT_TOKEN_HINTS = new Set([
+    'iphone', 'ipad', 'macbook', 'imac', 'watch', 'airpods',
+    'galaxy', 'pixel', 'xiaomi', 'oneplus', 'huawei', 'sony',
+    'surface', 'thinkpad', 'phone', 'smartphone', 'laptop',
+]);
+const PRODUCT_SPEC_TOKENS = new Set([
+    'spec', 'specs', 'specification', 'specifications', 'features',
+    'camera', 'battery', 'ram', 'storage', 'display', 'chip', 'soc',
+    'processor', 'weight', 'dimensions', 'screen', 'refresh', 'nits',
+    'zoom', 'charge', 'charging', 'size',
+]);
+const PRODUCT_BRAND_TOKENS = new Set([
+    'iphone', 'ipad', 'macbook', 'imac', 'galaxy', 'pixel', 'xiaomi',
+    'oneplus', 'huawei', 'sony', 'surface', 'thinkpad', 'motorola',
+    'nokia',
+]);
 
 function sanitizeSearchQuery(input) {
     const original = String(input || '').trim();
     if (!original) return '';
 
     let q = original
-        .replace(/^(show me|tell me|can you|could you|please|i need|i want|what is|what are|give me)\s+/i, '')
+        .replace(/^(show me|tell me|can you|could you|please|i need|i want|what is|what are|give me|search for|search|look up|find out|find)\s+/i, '')
         .replace(/\?+$/g, '')
         .trim();
 
@@ -110,12 +199,37 @@ function setCachedSearch(key, results) {
 }
 
 function shouldUseBingRss(query) {
-    return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(String(query || ''));
+    const q = String(query || '');
+    if (isAIBenchmarkQuery(q) || isProductSpecsQuery(q)) return false;
+    return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(q)
+        || isCurrentOfficeQuery(q);
 }
 
 function isRecencySensitiveQuery(query) {
     return /\b(latest|new|current|today|recent|benchmark|benchmarks|ranking|leaderboard|price|pricing|release|version|llm)\b/i
         .test(String(query || ''));
+}
+
+function isCurrentOfficeQuery(query) {
+    const q = String(query || '').toLowerCase();
+    const asksForPerson = /\b(who|current|incumbent|serving|office[- ]holder)\b/.test(q);
+    const officeMention = /\b(president|prime minister|ceo|governor|chancellor|secretary of state|speaker of the house)\b/.test(q);
+    if (asksForPerson && officeMention) return true;
+    return /\bpresident\b/.test(q) && /\b(us|usa|united states)\b/.test(q);
+}
+
+function isAIBenchmarkQuery(query) {
+    const q = String(query || '').toLowerCase();
+    return /\b(ai|llm|language model|models|gpt|claude|gemini|benchmark|benchmarks|leaderboard|ranking|sota|state of the art|mmlu|gpqa|livebench|swe-bench|arena)\b/
+        .test(q);
+}
+
+function isProductSpecsQuery(query) {
+    const q = String(query || '').toLowerCase();
+    const hasSpecsIntent = /\b(spec|specs|specification|specifications|features|camera|battery|ram|storage|dimensions|weight|display|chip|soc)\b/.test(q);
+    const hasProductHint = [...PRODUCT_TOKEN_HINTS].some((token) => q.includes(token));
+    if (hasSpecsIntent && hasProductHint) return true;
+    return hasProductHint && /\b\d{1,3}\b/.test(q) && /\b(pro|max|ultra|plus|mini|se)\b/.test(q);
 }
 
 function ensureRecencyHint(query) {
@@ -220,15 +334,15 @@ function parseDuckDuckGoLiteHTML(html) {
     while ((match = linkRegex.exec(html))) {
         let url = decodeHTMLEntities(match[1]);
         const label = cleanWhitespace(decodeHTMLEntities(stripHTMLTags(match[2] || '')));
-        if (!/^https?:\/\//i.test(url)) continue;
-        if (!label || label.length < 2) continue;
-
         const uddgMatch = url.match(/[?&]uddg=([^&]+)/i);
         if (uddgMatch) {
             try {
                 url = decodeURIComponent(uddgMatch[1]);
             } catch { }
         }
+
+        if (!/^https?:\/\//i.test(url)) continue;
+        if (!label || label.length < 2) continue;
 
         results.push({
             title: label,
@@ -272,10 +386,13 @@ function freshnessScore(result, recencyDays, query = '') {
     return 0.25;
 }
 
-function trustScore(result, trustedDomains = [], highStakes = false) {
+function trustScore(result, trustedDomains = [], highStakes = false, query = '') {
     const domain = result.domain || getDomainFromUrl(result.url);
     if (!domain) return 0.2;
     if (trustedDomains.includes(domain)) return 1;
+    if (isAIBenchmarkQuery(query) && AI_BENCHMARK_DOMAINS.has(domain)) return 0.96;
+    if (isProductSpecsQuery(query) && PRODUCT_SPECS_DOMAINS.has(domain)) return 0.95;
+    if (isCurrentOfficeQuery(query) && CURRENT_OFFICE_DOMAINS.has(domain)) return 0.97;
     if (domain === 'wikipedia.org') return 0.78;
     if (HIGH_TRUST_DOMAINS.has(domain)) return 0.92;
     if (domain.endsWith('.gov') || domain.endsWith('.edu')) return 0.9;
@@ -300,6 +417,81 @@ function evidenceQuality(score, trust, freshness) {
     return 'low';
 }
 
+function hasBenchmarkSignals(text) {
+    return /\b(leaderboard|benchmark|evaluation|eval|mmlu|gpqa|livebench|swe-bench|arena|score|ranking)\b/.test(String(text || '').toLowerCase());
+}
+
+function hasModelSignals(text) {
+    return /\b(ai|llm|language model|model|gpt|claude|gemini|llama|mistral|qwen|deepseek|mixtral)\b/.test(String(text || '').toLowerCase());
+}
+
+function hasSpecsSignals(text) {
+    return /\b(spec|specs|specification|specifications|technical|camera|battery|ram|storage|display|chip|soc|weight|dimensions)\b/.test(String(text || '').toLowerCase());
+}
+
+function isLikelySearchNoise(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+
+    const supportPatterns = [
+        /\b(search help|how .*search works|refine google searches|default search engine|support center)\b/,
+        /\b(tips .*results|search settings)\b/,
+    ];
+
+    if (domain.startsWith('support.') || domain.includes('help.')) {
+        if (isAIBenchmarkQuery(query) || supportPatterns.some((r) => r.test(text))) return true;
+    }
+
+    if (supportPatterns.some((r) => r.test(text)) && !hasBenchmarkSignals(text)) {
+        return true;
+    }
+
+    return false;
+}
+
+function extractQueryTokens(query) {
+    return String(query || '')
+        .toLowerCase()
+        .split(/\W+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !QUERY_NOISE_TOKENS.has(token));
+}
+
+function extractEntityTokens(query) {
+    const tokens = extractQueryTokens(query);
+    return tokens.filter((token) => !PRODUCT_SPEC_TOKENS.has(token));
+}
+
+function findBrandToken(tokens) {
+    for (const token of tokens) {
+        if (PRODUCT_BRAND_TOKENS.has(token)) return token;
+    }
+    return '';
+}
+
+function isSpecsRelevantResult(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    const text = `${result.title || ''} ${result.snippet || ''} ${domain}`.toLowerCase();
+    const entityTokens = extractEntityTokens(query);
+    const brandToken = findBrandToken(entityTokens);
+    const numberTokens = entityTokens.filter((token) => /^\d{1,3}$/.test(token));
+
+    if (brandToken && !text.includes(brandToken)) return false;
+    if (numberTokens.length > 0 && !numberTokens.some((token) => text.includes(token))) return false;
+    if (entityTokens.length > 0 && !entityTokens.some((token) => text.includes(token))) return false;
+
+    if (PRODUCT_SPECS_DOMAINS.has(domain)) return true;
+    if (domain === 'wikipedia.org') return hasSpecsSignals(text) && Boolean(brandToken || numberTokens.length > 0);
+    return hasSpecsSignals(text);
+}
+
+function isBenchmarkRelevantResult(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    if (AI_BENCHMARK_DOMAINS.has(domain)) return true;
+    const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+    return hasBenchmarkSignals(text) && hasModelSignals(`${query} ${text}`);
+}
+
 function applyQueryIntentAdjustment(result, query) {
     const q = String(query || '').toLowerCase();
     if (!q) return 0;
@@ -312,6 +504,7 @@ function applyQueryIntentAdjustment(result, query) {
     if (wantsSpecs) {
         if (/\b(spec|specification|full phone specs|datasheet)\b/.test(text)) delta += 0.12;
         if (/(gsmarena\.com|phonearena\.com|kimovil\.com|notebookcheck\.net|91mobiles\.com|smartprix\.com|nanoreview\.net)/.test(domain)) delta += 0.15;
+        if (domain === 'apple.com') delta += 0.2;
         if (/(community|forum|support|thread|help|discussion)/.test(text) || /(community\.)/.test(domain)) delta -= 0.15;
         if (domain === 'wikipedia.org') delta -= 0.12;
     }
@@ -319,17 +512,32 @@ function applyQueryIntentAdjustment(result, query) {
     const wantsCurrentOffice = /\b(president|prime minister|ceo|current)\b/.test(q);
     if (wantsCurrentOffice) {
         if (domain.endsWith('.gov') || domain.includes('whitehouse.gov') || domain.includes('usa.gov')) delta += 0.09;
-        if (domain === 'wikipedia.org') delta -= 0.03;
+        if (domain === 'wikipedia.org') delta -= 0.14;
+    }
+
+    if (isCurrentOfficeQuery(q)) {
+        const hasCurrentSignal = /\b(current|incumbent|administration|official|term|serving)\b/.test(text);
+        const hasHistoricalSignal = /\b(list of|past presidents|historical|history|former presidents)\b/.test(text);
+        if (CURRENT_OFFICE_DOMAINS.has(domain)) delta += 0.18;
+        if (hasCurrentSignal) delta += 0.08;
+        if (hasHistoricalSignal) delta -= 0.16;
+        if (domain === 'wikipedia.org' && !hasCurrentSignal) delta -= 0.2;
+        if (GENERIC_NEWS_DOMAINS.has(domain) && !hasCurrentSignal) delta -= 0.06;
+    }
+
+    const wantsAIBenchmark = isAIBenchmarkQuery(q);
+    if (wantsAIBenchmark) {
+        const benchmarkSignals = hasBenchmarkSignals(text);
+        if (AI_BENCHMARK_DOMAINS.has(domain)) delta += 0.22;
+        if (benchmarkSignals) delta += 0.14;
+        if (GENERIC_NEWS_DOMAINS.has(domain) && !benchmarkSignals) delta -= 0.2;
     }
 
     return delta;
 }
 
 function queryRelevanceScore(result, query) {
-    const qTokens = String(query || '')
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((t) => t.length >= 3);
+    const qTokens = extractQueryTokens(query);
     if (qTokens.length === 0) return 1;
 
     const text = `${result.title || ''} ${result.snippet || ''} ${result.domain || ''}`.toLowerCase();
@@ -566,6 +774,7 @@ function dedupeAndScore(rawResults, options) {
 
     const highStakes = isHighStakesQuery(query);
     const recencySensitive = isRecencySensitiveQuery(query);
+    const productSpecs = isProductSpecsQuery(query);
     const seen = new Map();
     const agreementMap = new Map();
 
@@ -584,12 +793,22 @@ function dedupeAndScore(rawResults, options) {
 
     const scored = [];
     for (const result of seen.values()) {
+        if (isLikelySearchNoise(result, query)) continue;
+        if (isAIBenchmarkQuery(query) && !isBenchmarkRelevantResult(result, query)) continue;
+        if (productSpecs && !isSpecsRelevantResult(result, query)) continue;
+
         const relevance = queryRelevanceScore(result, query);
-        if (relevance <= 0 && !String(result.domain || '').endsWith('.gov')) {
+        if ((relevance <= 0 && !String(result.domain || '').endsWith('.gov')) || (productSpecs && relevance < 0.15)) {
             continue;
         }
 
-        const domainTrust = trustScore(result, trustedDomains, highStakes);
+        if (isCurrentOfficeQuery(query)) {
+            const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+            const isHistorical = /\b(list of|past presidents|former presidents|historical|history)\b/.test(text);
+            if (result.domain === 'wikipedia.org' && isHistorical) continue;
+        }
+
+        const domainTrust = trustScore(result, trustedDomains, highStakes, query);
         const freshness = freshnessScore(result, recencyDays, query);
         const specificity = specificityScore(result);
         const providerWeight = PROVIDER_WEIGHTS[result.sourceEngine] || 0.1;
@@ -653,6 +872,89 @@ function normalizeDomainList(value) {
     return [...set];
 }
 
+function appendProviderResults(raw, providerSummary, settledResults) {
+    for (const result of settledResults) {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            for (const item of result.value) {
+                const normalized = normalizeResult(item);
+                raw.push(normalized);
+                if (providerSummary[normalized.sourceEngine] !== undefined) {
+                    providerSummary[normalized.sourceEngine] += 1;
+                }
+            }
+        } else {
+            providerSummary.failed += 1;
+        }
+    }
+}
+
+function shouldRunRescuePass(ranked, query, maxResults, trustedDomains = []) {
+    const top = ranked.slice(0, Math.max(5, maxResults));
+    if (top.length === 0) return true;
+
+    const uniqueDomains = new Set(top.map((r) => r.domain).filter(Boolean));
+    const wikiCount = top.filter((r) => r.domain === 'wikipedia.org').length;
+    const nonWikiCount = top.length - wikiCount;
+
+    if (nonWikiCount === 0) return true;
+    if (wikiCount >= Math.ceil(top.length * 0.6)) return true;
+    if (top.length >= 3 && uniqueDomains.size < 2) return true;
+
+    if (isCurrentOfficeQuery(query)) {
+        const officialCount = top.filter((r) => CURRENT_OFFICE_DOMAINS.has(r.domain) || String(r.domain || '').endsWith('.gov')).length;
+        if (officialCount < 1) return true;
+    }
+
+    if (isAIBenchmarkQuery(query)) {
+        const benchmarkCount = top.filter((r) => AI_BENCHMARK_DOMAINS.has(r.domain)).length;
+        const trustedHits = top.filter((r) => trustedDomains.includes(r.domain) || Number(r.trustScore || 0) >= 0.88).length;
+        if (benchmarkCount < 1 || trustedHits < 2) return true;
+    }
+    if (isProductSpecsQuery(query)) {
+        const specsCount = top.filter((r) => PRODUCT_SPECS_DOMAINS.has(r.domain)).length;
+        if (specsCount < 1) return true;
+    }
+
+    return false;
+}
+
+function buildRescueQueries(query) {
+    const q = String(query || '').trim();
+    if (!q) return [];
+
+    const year = new Date().getFullYear();
+    let queries = [
+        `${q} official source`,
+        `${q} ${year}`,
+    ];
+
+    if (isCurrentOfficeQuery(q)) {
+        queries = [
+            `site:whitehouse.gov ${q}`,
+            `site:usa.gov ${q}`,
+            `${q} incumbent ${year}`,
+        ];
+    }
+
+    if (isAIBenchmarkQuery(q)) {
+        queries = [
+            `site:paperswithcode.com language model leaderboard`,
+            `site:lmarena.ai llm leaderboard`,
+            `site:huggingface.co open llm leaderboard`,
+            `${q} llm benchmark leaderboard ${year}`,
+        ];
+    }
+    if (isProductSpecsQuery(q)) {
+        queries = [
+            `site:apple.com ${q} technical specifications`,
+            `site:gsmarena.com ${q} specs`,
+            `${q} full specifications`,
+        ];
+    }
+
+    return [...new Set(queries.map((item) => item.trim()).filter(Boolean))].slice(0, 3);
+}
+
 async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
     const options = typeof optionsOrMaxResults === 'number'
         ? { maxResults: optionsOrMaxResults }
@@ -668,7 +970,7 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
     const excludeDomains = normalizeDomainList(options.excludeDomains);
 
     const searchQuery = ensureRecencyHint(sanitizeSearchQuery(query));
-    const recencyDays = isRecencySensitiveQuery(searchQuery)
+    const recencyDays = isRecencySensitiveQuery(searchQuery) || isCurrentOfficeQuery(searchQuery)
         ? Math.min(baseRecencyDays, 21)
         : baseRecencyDays;
     const cacheKey = makeCacheKey(searchQuery, {
@@ -684,76 +986,86 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         return cached.slice(0, maxResults);
     }
 
-    const timeout = setTimeout(() => { }, SEARCH_TIMEOUT_MS);
-    try {
-        const providerSummary = {
-            ddg_html: 0,
-            ddg_lite: 0,
-            bing_rss: 0,
-            ddg_instant: 0,
-            wikipedia: 0,
-            failed: 0,
-        };
-        const raw = [];
+    const providerSummary = {
+        ddg_html: 0,
+        ddg_lite: 0,
+        bing_rss: 0,
+        ddg_instant: 0,
+        wikipedia: 0,
+        failed: 0,
+    };
+    const raw = [];
+    const aiBenchmark = isAIBenchmarkQuery(searchQuery);
+    const productSpecs = isProductSpecsQuery(searchQuery);
+    const primaryProviders = [
+        searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
+        searchDDGLiteProvider(searchQuery, maxResults * 2),
+    ];
+    const primarySettled = await Promise.allSettled(primaryProviders);
+    appendProviderResults(raw, providerSummary, primarySettled);
 
-        const primaryProviders = [
-            searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
-            searchDDGLiteProvider(searchQuery, maxResults * 2),
+    const primaryRanked = dedupeAndScore(raw, {
+        recencyDays,
+        trustedDomains,
+        excludeDomains,
+        query: searchQuery,
+    });
+
+    const currentOffice = isCurrentOfficeQuery(searchQuery);
+    const benchmarkPrimaryCount = primaryRanked.filter((item) => AI_BENCHMARK_DOMAINS.has(item.domain)).length;
+    const trustedPrimaryCount = primaryRanked.filter((item) => (
+        CURRENT_OFFICE_DOMAINS.has(item.domain)
+        || trustedDomains.includes(item.domain)
+        || item.trustScore >= 0.9
+    )).length;
+    const needsSecondary = primaryRanked.length < Math.max(4, maxResults)
+        || (currentOffice && trustedPrimaryCount < 2)
+        || (aiBenchmark && benchmarkPrimaryCount < 2)
+        || (productSpecs && primaryRanked.length < Math.max(3, maxResults));
+    if (needsSecondary) {
+        const secondaryProviders = [
+            ...(!productSpecs ? [searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+            ...(!aiBenchmark && !productSpecs ? [searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+            ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
         ];
-        const primarySettled = await Promise.allSettled(primaryProviders);
-        for (const result of primarySettled) {
-            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                for (const item of result.value) {
-                    const normalized = normalizeResult(item);
-                    raw.push(normalized);
-                    if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
-                }
-            } else {
-                providerSummary.failed += 1;
-            }
-        }
-
-        const primaryRanked = dedupeAndScore(raw, {
-            recencyDays,
-            trustedDomains,
-            excludeDomains,
-            query: searchQuery,
-        });
-
-        const needsSecondary = primaryRanked.length < Math.max(4, maxResults);
-        if (needsSecondary) {
-            const secondaryProviders = [
-                searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
-            ];
-            const secondarySettled = await Promise.allSettled(secondaryProviders);
-            for (const result of secondarySettled) {
-                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                    for (const item of result.value) {
-                        const normalized = normalizeResult(item);
-                        raw.push(normalized);
-                        if (providerSummary[normalized.sourceEngine] !== undefined) providerSummary[normalized.sourceEngine] += 1;
-                    }
-                } else {
-                    providerSummary.failed += 1;
-                }
-            }
-        }
-
-        const ranked = dedupeAndScore(raw, {
-            recencyDays,
-            trustedDomains,
-            excludeDomains,
-            query: searchQuery,
-        });
-        console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
-        const output = ranked.slice(0, maxResults);
-        setCachedSearch(cacheKey, output);
-        return output;
-    } finally {
-        clearTimeout(timeout);
+        const secondarySettled = await Promise.allSettled(secondaryProviders);
+        appendProviderResults(raw, providerSummary, secondarySettled);
     }
+
+    let ranked = dedupeAndScore(raw, {
+        recencyDays,
+        trustedDomains,
+        excludeDomains,
+        query: searchQuery,
+    });
+
+    if (shouldRunRescuePass(ranked, searchQuery, maxResults, trustedDomains)) {
+        const rescueQueries = buildRescueQueries(searchQuery);
+        const rescueTasks = [];
+        for (const rescueQuery of rescueQueries) {
+            rescueTasks.push(
+                searchDDGHtmlProvider(rescueQuery, maxResults * 2, locale),
+                searchDDGLiteProvider(rescueQuery, maxResults * 2),
+                ...(!productSpecs ? [searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+                ...((shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery)) && !aiBenchmark && !productSpecs
+                    ? [searchBingRssProvider(rescueQuery, maxResults * 2)]
+                    : []),
+            );
+        }
+        const rescueSettled = await Promise.allSettled(rescueTasks);
+        appendProviderResults(raw, providerSummary, rescueSettled);
+        ranked = dedupeAndScore(raw, {
+            recencyDays,
+            trustedDomains,
+            excludeDomains,
+            query: searchQuery,
+        });
+    }
+
+    console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
+    const output = ranked.slice(0, maxResults);
+    setCachedSearch(cacheKey, output);
+    return output;
 }
 
 module.exports = async function handler(req, res) {
@@ -811,4 +1123,6 @@ module.exports.__test = {
     parseDuckDuckGoHTML,
     parseDuckDuckGoLiteHTML,
     parseRssItems,
+    isProductSpecsQuery,
+    isSpecsRelevantResult,
 };
