@@ -81,3 +81,33 @@ test('dedupeAndScore deprioritizes historical Wikipedia pages for current-office
     assert.ok(ranked.length >= 1);
     assert.equal(ranked[0].domain, 'whitehouse.gov');
 });
+
+test('dedupeAndScore filters benchmark-unrelated support pages for AI benchmark intent', () => {
+    const ranked = searchModule.__test.dedupeAndScore([
+        {
+            title: 'Google Search Help',
+            url: 'https://support.google.com/websearch/answer/134479',
+            snippet: 'Learn search tips and how results are ranked.',
+            sourceEngine: 'ddg_html',
+            domain: 'google.com',
+            publishedAt: '2026-01-10',
+        },
+        {
+            title: 'Papers With Code - Language Model Evaluation',
+            url: 'https://paperswithcode.com/task/language-modelling',
+            snippet: 'Leaderboard benchmark results for language models.',
+            sourceEngine: 'ddg_html',
+            domain: 'paperswithcode.com',
+            publishedAt: '2026-01-10',
+        },
+    ], {
+        query: 'latest ai llms leaderboard',
+        recencyDays: 14,
+        trustedDomains: [],
+        excludeDomains: [],
+    });
+
+    assert.ok(ranked.length >= 1);
+    assert.equal(ranked[0].domain, 'paperswithcode.com');
+    assert.equal(ranked.some((item) => item.url.includes('support.google.com')), false);
+});

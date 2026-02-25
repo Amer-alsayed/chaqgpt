@@ -4,10 +4,9 @@
 
 const MAX_RESULTS_DEFAULT = 5;
 const MAX_RESULTS_LIMIT = 10;
-const SEARCH_TIMEOUT_MS = 10_000;
-const PROVIDER_TIMEOUT_MS = 3_500;
+const PROVIDER_TIMEOUT_MS = 2_800;
 const PROVIDER_RETRY_COUNT = 1;
-const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX_ENTRIES = 200;
 
 const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
@@ -99,13 +98,31 @@ const BROWSER_HEADERS = {
 };
 
 const searchCache = new Map();
+const QUERY_NOISE_TOKENS = new Set([
+    'search',
+    'find',
+    'look',
+    'latest',
+    'current',
+    'today',
+    'new',
+    'make',
+    'build',
+    'create',
+    'show',
+    'tell',
+    'give',
+    'please',
+    'help',
+    'how',
+]);
 
 function sanitizeSearchQuery(input) {
     const original = String(input || '').trim();
     if (!original) return '';
 
     let q = original
-        .replace(/^(show me|tell me|can you|could you|please|i need|i want|what is|what are|give me)\s+/i, '')
+        .replace(/^(show me|tell me|can you|could you|please|i need|i want|what is|what are|give me|search for|search|look up|find out|find)\s+/i, '')
         .replace(/\?+$/g, '')
         .trim();
 
@@ -153,6 +170,7 @@ function setCachedSearch(key, results) {
 
 function shouldUseBingRss(query) {
     const q = String(query || '');
+    if (isAIBenchmarkQuery(q)) return false;
     return /\b(news|latest|today|breaking|update|updates|live)\b/i.test(q)
         || isCurrentOfficeQuery(q);
 }
@@ -360,6 +378,49 @@ function evidenceQuality(score, trust, freshness) {
     return 'low';
 }
 
+function hasBenchmarkSignals(text) {
+    return /\b(leaderboard|benchmark|evaluation|eval|mmlu|gpqa|livebench|swe-bench|arena|score|ranking)\b/.test(String(text || '').toLowerCase());
+}
+
+function hasModelSignals(text) {
+    return /\b(ai|llm|language model|model|gpt|claude|gemini|llama|mistral|qwen|deepseek|mixtral)\b/.test(String(text || '').toLowerCase());
+}
+
+function isLikelySearchNoise(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+
+    const supportPatterns = [
+        /\b(search help|how .*search works|refine google searches|default search engine|support center)\b/,
+        /\b(tips .*results|search settings)\b/,
+    ];
+
+    if (domain.startsWith('support.') || domain.includes('help.')) {
+        if (isAIBenchmarkQuery(query) || supportPatterns.some((r) => r.test(text))) return true;
+    }
+
+    if (supportPatterns.some((r) => r.test(text)) && !hasBenchmarkSignals(text)) {
+        return true;
+    }
+
+    return false;
+}
+
+function extractQueryTokens(query) {
+    return String(query || '')
+        .toLowerCase()
+        .split(/\W+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !QUERY_NOISE_TOKENS.has(token));
+}
+
+function isBenchmarkRelevantResult(result, query) {
+    const domain = String(result.domain || '').toLowerCase();
+    if (AI_BENCHMARK_DOMAINS.has(domain)) return true;
+    const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+    return hasBenchmarkSignals(text) && hasModelSignals(`${query} ${text}`);
+}
+
 function applyQueryIntentAdjustment(result, query) {
     const q = String(query || '').toLowerCase();
     if (!q) return 0;
@@ -394,7 +455,7 @@ function applyQueryIntentAdjustment(result, query) {
 
     const wantsAIBenchmark = isAIBenchmarkQuery(q);
     if (wantsAIBenchmark) {
-        const benchmarkSignals = /\b(leaderboard|benchmark|evaluation|eval|mmlu|gpqa|livebench|swe-bench|arena|score|ranking)\b/.test(text);
+        const benchmarkSignals = hasBenchmarkSignals(text);
         if (AI_BENCHMARK_DOMAINS.has(domain)) delta += 0.22;
         if (benchmarkSignals) delta += 0.14;
         if (GENERIC_NEWS_DOMAINS.has(domain) && !benchmarkSignals) delta -= 0.2;
@@ -404,10 +465,7 @@ function applyQueryIntentAdjustment(result, query) {
 }
 
 function queryRelevanceScore(result, query) {
-    const qTokens = String(query || '')
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((t) => t.length >= 3);
+    const qTokens = extractQueryTokens(query);
     if (qTokens.length === 0) return 1;
 
     const text = `${result.title || ''} ${result.snippet || ''} ${result.domain || ''}`.toLowerCase();
@@ -662,6 +720,9 @@ function dedupeAndScore(rawResults, options) {
 
     const scored = [];
     for (const result of seen.values()) {
+        if (isLikelySearchNoise(result, query)) continue;
+        if (isAIBenchmarkQuery(query) && !isBenchmarkRelevantResult(result, query)) continue;
+
         const relevance = queryRelevanceScore(result, query);
         if (relevance <= 0 && !String(result.domain || '').endsWith('.gov')) {
             continue;
@@ -784,24 +845,29 @@ function buildRescueQueries(query) {
     if (!q) return [];
 
     const year = new Date().getFullYear();
-    const queries = [
+    let queries = [
         `${q} official source`,
         `${q} ${year}`,
     ];
 
     if (isCurrentOfficeQuery(q)) {
-        queries.unshift(`site:whitehouse.gov ${q}`);
-        queries.push(`site:usa.gov ${q}`);
-        queries.push(`${q} incumbent ${year}`);
+        queries = [
+            `site:whitehouse.gov ${q}`,
+            `site:usa.gov ${q}`,
+            `${q} incumbent ${year}`,
+        ];
     }
 
     if (isAIBenchmarkQuery(q)) {
-        queries.unshift(`site:paperswithcode.com ${q} leaderboard`);
-        queries.push(`site:lmarena.ai ${q} ranking`);
-        queries.push(`site:huggingface.co ${q} benchmark`);
+        queries = [
+            `site:paperswithcode.com language model leaderboard`,
+            `site:lmarena.ai llm leaderboard`,
+            `site:huggingface.co open llm leaderboard`,
+            `${q} llm benchmark leaderboard ${year}`,
+        ];
     }
 
-    return [...new Set(queries.map((item) => item.trim()).filter(Boolean))].slice(0, 4);
+    return [...new Set(queries.map((item) => item.trim()).filter(Boolean))].slice(0, 3);
 }
 
 async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT) {
@@ -835,86 +901,84 @@ async function searchDuckDuckGo(query, optionsOrMaxResults = MAX_RESULTS_DEFAULT
         return cached.slice(0, maxResults);
     }
 
-    const timeout = setTimeout(() => { }, SEARCH_TIMEOUT_MS);
-    try {
-        const providerSummary = {
-            ddg_html: 0,
-            ddg_lite: 0,
-            bing_rss: 0,
-            ddg_instant: 0,
-            wikipedia: 0,
-            failed: 0,
-        };
-        const raw = [];
+    const providerSummary = {
+        ddg_html: 0,
+        ddg_lite: 0,
+        bing_rss: 0,
+        ddg_instant: 0,
+        wikipedia: 0,
+        failed: 0,
+    };
+    const raw = [];
+    const aiBenchmark = isAIBenchmarkQuery(searchQuery);
+    const primaryProviders = [
+        searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
+        searchDDGLiteProvider(searchQuery, maxResults * 2),
+    ];
+    const primarySettled = await Promise.allSettled(primaryProviders);
+    appendProviderResults(raw, providerSummary, primarySettled);
 
-        const primaryProviders = [
-            searchDDGHtmlProvider(searchQuery, maxResults * 2, locale),
-            searchDDGLiteProvider(searchQuery, maxResults * 2),
+    const primaryRanked = dedupeAndScore(raw, {
+        recencyDays,
+        trustedDomains,
+        excludeDomains,
+        query: searchQuery,
+    });
+
+    const currentOffice = isCurrentOfficeQuery(searchQuery);
+    const benchmarkPrimaryCount = primaryRanked.filter((item) => AI_BENCHMARK_DOMAINS.has(item.domain)).length;
+    const trustedPrimaryCount = primaryRanked.filter((item) => (
+        CURRENT_OFFICE_DOMAINS.has(item.domain)
+        || trustedDomains.includes(item.domain)
+        || item.trustScore >= 0.9
+    )).length;
+    const needsSecondary = primaryRanked.length < Math.max(4, maxResults)
+        || (currentOffice && trustedPrimaryCount < 2)
+        || (aiBenchmark && benchmarkPrimaryCount < 2);
+    if (needsSecondary) {
+        const secondaryProviders = [
+            searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
+            ...(!aiBenchmark ? [searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2)))] : []),
+            ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
         ];
-        const primarySettled = await Promise.allSettled(primaryProviders);
-        appendProviderResults(raw, providerSummary, primarySettled);
-
-        const primaryRanked = dedupeAndScore(raw, {
-            recencyDays,
-            trustedDomains,
-            excludeDomains,
-            query: searchQuery,
-        });
-
-        const currentOffice = isCurrentOfficeQuery(searchQuery);
-        const trustedPrimaryCount = primaryRanked.filter((item) => (
-            CURRENT_OFFICE_DOMAINS.has(item.domain)
-            || trustedDomains.includes(item.domain)
-            || item.trustScore >= 0.9
-        )).length;
-        const needsSecondary = primaryRanked.length < Math.max(4, maxResults)
-            || (currentOffice && trustedPrimaryCount < 2);
-        if (needsSecondary) {
-            const secondaryProviders = [
-                searchDDGInstantProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                searchWikipediaProvider(searchQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                ...(shouldUseBingRss(searchQuery) ? [searchBingRssProvider(searchQuery, maxResults * 2)] : []),
-            ];
-            const secondarySettled = await Promise.allSettled(secondaryProviders);
-            appendProviderResults(raw, providerSummary, secondarySettled);
-        }
-
-        let ranked = dedupeAndScore(raw, {
-            recencyDays,
-            trustedDomains,
-            excludeDomains,
-            query: searchQuery,
-        });
-
-        if (shouldRunRescuePass(ranked, searchQuery, maxResults, trustedDomains)) {
-            const rescueQueries = buildRescueQueries(searchQuery);
-            for (const rescueQuery of rescueQueries) {
-                const rescueProviders = [
-                    searchDDGHtmlProvider(rescueQuery, maxResults * 2, locale),
-                    searchDDGLiteProvider(rescueQuery, maxResults * 2),
-                    searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2))),
-                    ...(shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery) || isAIBenchmarkQuery(searchQuery)
-                        ? [searchBingRssProvider(rescueQuery, maxResults * 2)]
-                        : []),
-                ];
-                const rescueSettled = await Promise.allSettled(rescueProviders);
-                appendProviderResults(raw, providerSummary, rescueSettled);
-            }
-            ranked = dedupeAndScore(raw, {
-                recencyDays,
-                trustedDomains,
-                excludeDomains,
-                query: searchQuery,
-            });
-        }
-
-        console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
-        const output = ranked.slice(0, maxResults);
-        setCachedSearch(cacheKey, output);
-        return output;
-    } finally {
-        clearTimeout(timeout);
+        const secondarySettled = await Promise.allSettled(secondaryProviders);
+        appendProviderResults(raw, providerSummary, secondarySettled);
     }
+
+    let ranked = dedupeAndScore(raw, {
+        recencyDays,
+        trustedDomains,
+        excludeDomains,
+        query: searchQuery,
+    });
+
+    if (shouldRunRescuePass(ranked, searchQuery, maxResults, trustedDomains)) {
+        const rescueQueries = buildRescueQueries(searchQuery);
+        const rescueTasks = [];
+        for (const rescueQuery of rescueQueries) {
+            rescueTasks.push(
+                searchDDGHtmlProvider(rescueQuery, maxResults * 2, locale),
+                searchDDGLiteProvider(rescueQuery, maxResults * 2),
+                searchDDGInstantProvider(rescueQuery, Math.max(2, Math.ceil(maxResults / 2))),
+                ...((shouldUseBingRss(rescueQuery) || isCurrentOfficeQuery(searchQuery)) && !aiBenchmark
+                    ? [searchBingRssProvider(rescueQuery, maxResults * 2)]
+                    : []),
+            );
+        }
+        const rescueSettled = await Promise.allSettled(rescueTasks);
+        appendProviderResults(raw, providerSummary, rescueSettled);
+        ranked = dedupeAndScore(raw, {
+            recencyDays,
+            trustedDomains,
+            excludeDomains,
+            query: searchQuery,
+        });
+    }
+
+    console.log(`[SearchProviders] ${JSON.stringify({ query: searchQuery, providerSummary, ranked: ranked.length })}`);
+    const output = ranked.slice(0, maxResults);
+    setCachedSearch(cacheKey, output);
+    return output;
 }
 
 module.exports = async function handler(req, res) {
